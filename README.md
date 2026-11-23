@@ -1,253 +1,212 @@
-# USBCD – Android-Tablet als zweiter Monitor mit Lautsprechern (USB-C, Windows 11)
+# USBCD – Android tablet as a second monitor with speakers (USB-C, Windows 11)
 
-*English version: [README.en.md](README.en.md)*
+*Deutsche Version: [README.de.md](README.de.md)*
 
-Tablet per USB-C anstecken → Windows bekommt einen **neuen Monitor** mit der nativen Auflösung und der höchsten
-Bildrate des Tablets. Dazu gibt es einen Ausgang **„USBCD Tablet Lautsprecher“**, den du in Windows wählen kannst.
-Beim Abziehen verschwindet der Monitor wieder.
+Connect the tablet via USB-C → Windows gets a **new monitor** with the tablet's native resolution and highest
+refresh rate. There is also an output **"USBCD Tablet Speakers"** that you can choose in Windows.
+When you unplug the tablet, the monitor disappears again.
 
-In den Windows-Anzeigeeinstellungen stehen zusätzlich kleinere Auflösungen im Seitenverhältnis des Tablets
-(beim Tab S6 Lite 1600 × 960, 1280 × 768, 1000 × 600). Sie werden in dieser Größe übertragen und erst vom Tablet
-hochgerechnet – das entlastet schwächere PCs. Für größere Schrift bleibt die Skalierung die schärfere Wahl.
+Windows display settings also offer smaller resolutions in the tablet's aspect ratio (Tab S6 Lite: 1600 × 960,
+1280 × 768, 1000 × 600). They are transmitted at that size and upscaled by the tablet – easier on weaker PCs.
+For larger text, scaling stays the sharper choice.
 
-Sprache: Deutsch oder Englisch – Setup, Windows-Programm und Tablet-App richten sich nach der jeweiligen Systemsprache.
+Language: English or German – setup, Windows program and tablet app follow the respective system language.
 
-## Voraussetzungen
+## Requirements
 
-* Windows 11 (64 Bit)
-* Android-Tablet ab Android 8.0 und ein USB-C-Datenkabel – entwickelt und getestet mit dem Samsung Galaxy Tab S6 Lite
-* Empfohlen: Grafikkarte mit Hardware-Encoder (NVIDIA, AMD oder Intel). Ohne läuft es per Software, aber langsamer.
+* Windows 11 (64-bit)
+* Android tablet with Android 8.0 or newer and a USB-C data cable – developed and tested with the Samsung Galaxy Tab S6 Lite
+* Recommended: a GPU with a hardware encoder (NVIDIA, AMD or Intel). Without one it falls back to software, which is slower.
 
-## Wie es funktioniert
+## How it works
 
-Ein Android-Tablet kann sich am USB-C-Port technisch nicht als Monitor ausgeben: Der Port arbeitet nur als
-USB-*Gerät* (MTP, ADB …) und hat keinen Bildeingang. Deshalb gibt es zwei Teile:
+An Android tablet cannot present itself as a monitor on its USB-C port: the port only works as a USB *device*
+(MTP, ADB …) and has no video input. That's why there are two parts:
 
-```
- Windows 11                                            Android-Tablet
-┌────────────────────────────────────────┐  USB-C  ┌────────────────────────────────┐
-│ USBCD (Rust, Symbol in der Taskleiste) │  (adb)  │ USBCD-App (Kotlin)             │
-│  • erkennt das Tablet, startet die App │◄───────►│  • wählt höchsten Display-Modus│
-│  • Virtual Display Driver = echter     │  Infos  │  • meldet Auflösung, Hz,       │
-│    Monitor mit Tablet-Auflösung/-Hz    │◄────────│    Decoder-Fähigkeiten         │
-│  • FFmpeg-Aufnahme + GPU-Encoder       │  Video  │  • Hardware-Decoder (HEVC/H.264)│
-│    (NVENC / AMF / QSV)                 │────────►│    mit niedriger Latenz        │
-│  • „USBCD Tablet Lautsprecher“         │  Ton    │  • Ton über Tablet-Lautsprecher│
-│    → WASAPI-Loopback → PCM             │────────►│    bzw. Kopfhörer am Tablet    │
-└────────────────────────────────────────┘         └────────────────────────────────┘
-```
+* **Windows (Rust, taskbar icon):** detects the tablet, starts the app, creates a real virtual monitor
+  ([Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)) with the tablet's resolution
+  and refresh rate, captures it with FFmpeg and encodes it on the GPU (NVENC / AMF / QSV). Sound played on
+  "USBCD Tablet Speakers" (VB-CABLE) is captured and sent uncompressed.
+* **Tablet app (Kotlin):** picks the highest display mode, reports resolution and decoder capabilities,
+  decodes in hardware with low latency, plays the sound.
+* **Connection:** ADB over the USB cable – no Wi-Fi needed.
 
-* **Monitor:** [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (signiert, Open Source).
-  Für Windows ein normaler Monitor (Anordnung, Skalierung, Fenster verschieben …).
-* **Bild:** FFmpeg nimmt genau diesen Monitor auf und kodiert auf der Grafikkarte; die App dekodiert in Hardware.
-* **Ton:** Der Standard-Ausgang wird **nicht** umgestellt. Für Ton übers Tablet in Windows „USBCD Tablet Lautsprecher“ wählen.
-* **Verbindung:** über ADB auf dem USB-Kabel – kein WLAN nötig.
+The default sound output is **not** changed. For sound on the tablet, choose "USBCD Tablet Speakers" in Windows.
 
-## Sicherheit
+## Security
 
-* **USBCD läuft ohne Administratorrechte** (Autostart über `HKCU\…\Run`). Was Rechte braucht – den virtuellen
-  Monitor ein-/ausschalten, seinen Modus eintragen, den Lautsprecher benennen –, erledigt der Windows-Dienst
-  **„USBCD Helper“**. Er nimmt über die lokale Leitung `\\.\pipe\USBCD-Helper` nur fest eingebaute Befehle mit
-  geprüften Werten an, und nur von der installierten `USBCD.exe`. Keine Pfade, keine Skripte, kein PowerShell.
-* **Gegenseitige Anmeldung PC ↔ Tablet:** Beim Start bekommt die App über adb ein zufälliges Geheimnis
-  (nur im Arbeitsspeicher, gültig solange USBCD läuft). Jede Verbindung beginnt mit einem HMAC-SHA256-
-  Challenge-Response in beide Richtungen. Eine fremde App, die den USBCD-Anschluss auf dem Tablet belegt,
-  bekommt so kein Bild, und niemand kann der App ein falsches Bild unterschieben. Das Geheimnis nimmt die App
-  nur über den Einstieg `.Connect` an, den allein die adb-Shell öffnen darf.
-* **Abgesicherte Ordner:** `C:\VirtualDisplayDriver` (Treiber-Einstellungen) und `C:\ProgramData\USBCD`
-  (Logs von Dienst und Setup) dürfen nur Administratoren ändern.
-* **Geprüfte Downloads:** Das Setup prüft die Signatur von VB-CABLE (VB-Audio) vor dem Start. Der Build prüft
-  die Signaturen von adb (Google) und Monitor-Treiber und merkt sich SHA-256-Prüfsummen in
-  `installer\deps.lock.json` – ändert sich eine Datei unbemerkt, bricht der Build ab.
-* **Tablet-App** mit eigenem Release-Schlüssel signiert (`installer\keys\`, beim ersten Bauen angelegt – **sichern
-  und nicht weitergeben**). Eine anders signierte Fassung (z. B. aus Android Studio) ersetzt USBCD beim Anstecken.
-* **Code-Signatur (optional):** Mit `USBCD_SIGN_CERT_THUMBPRINT` (Fingerabdruck eines Code-Signing-Zertifikats im
-  Zertifikatspeicher) signiert der Build `USBCD.exe`, Setup und Deinstallation.
-* **USB-Debugging** gibt dem verbundenen PC weitreichenden Zugriff auf das Tablet. Nur an eigenen PCs
-  „Immer zulassen“ wählen; fremde Freigaben unter *Entwickleroptionen → USB-Debugging-Autorisierungen aufheben*
-  löschen.
+* **USBCD runs without administrator rights** (autostart via `HKCU\…\Run`). The few things that need rights –
+  switching the virtual monitor on/off, setting its mode, naming the speaker – are done by the Windows service
+  **"USBCD Helper"**. Over the local pipe `\\.\pipe\USBCD-Helper` it accepts only fixed, built-in commands with
+  checked values, and only from the installed `USBCD.exe`. No paths, no scripts, no PowerShell.
+* **Mutual sign-in PC ↔ tablet:** on launch the app receives a random secret via adb (kept in memory only, valid
+  while USBCD runs). Every connection starts with an HMAC-SHA256 challenge-response in both directions. Another app
+  occupying the USBCD port on the tablet therefore gets no picture, and nobody can feed the app a fake picture.
+  The app accepts the secret only through the `.Connect` entry point, which only the adb shell may open.
+* **Protected folders:** `C:\VirtualDisplayDriver` (driver settings) and `C:\ProgramData\USBCD` (service and
+  setup logs) can only be changed by administrators.
+* **Checked downloads:** the setup verifies VB-CABLE's signature (VB-Audio) before running it. The build verifies
+  the signatures of adb (Google) and the monitor driver and pins SHA-256 checksums in `installer\deps.lock.json` –
+  if a file changes unnoticed, the build stops.
+* **Tablet app** signed with its own release key (`installer\keys\`, created on the first build – **back it up and
+  keep it private**). A differently signed copy (e.g. from Android Studio) is replaced by USBCD when connecting.
+* **Code signing (optional):** with `USBCD_SIGN_CERT_THUMBPRINT` (thumbprint of a code-signing certificate in the
+  certificate store) the build signs `USBCD.exe`, the setup and the uninstaller.
+* **USB debugging** gives the connected PC far-reaching access to the tablet. Choose "Always allow" only on your own
+  PCs and remove other authorizations under *Developer options → Revoke USB debugging authorizations*.
 
-## Einrichtung
+## Setup
 
-### Tablet (einmalig)
-1. Einstellungen → Tabletinfo → Softwareinformationen → 7× auf *Buildnummer* tippen.
-2. Entwickleroptionen → **USB-Debugging** einschalten.
+### Tablet (once)
+1. Settings → About tablet → Software information → tap *Build number* 7 times.
+2. Developer options → turn on **USB debugging**.
 
-### Installieren
-1. Die neueste **`USBCD-Setup-<version>.exe`** unter [Releases](../../releases/latest) herunterladen und ausführen.
-   Das Setup erklärt vorab, was passiert; Windows fragt bis zu zweimal nach Treiber-Software
-   (Monitor, VB-CABLE) – jeweils *Installieren*. Nach der ersten VB-CABLE-Installation einmal neu starten.
-2. Tablet anstecken und „USB-Debugging zulassen?“ mit **„Immer von diesem Computer zulassen“** bestätigen.
-   **Die App wird automatisch auf das Tablet übertragen** und bei neuen Versionen aktualisiert.
+### Install
+1. Download the latest **`USBCD-Setup-<version>.exe`** from [Releases](../../releases/latest) and run it.
+   It explains what will happen; Windows asks up to twice about driver software
+   (monitor, VB-CABLE) – click *Install* each time. Restart once after the first VB-CABLE installation.
+2. Connect the tablet and confirm "Allow USB debugging?" with **"Always allow from this computer"**.
+   **The app is transferred to the tablet automatically** and updated with new versions.
 
-Wer das Setup selbst bauen möchte: siehe [Selbst bauen](#selbst-bauen).
+To build the setup yourself, see [Building from source](#building-from-source).
 
-## Bedienung
+## Usage
 
-USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick darauf öffnet das Menü:
+USBCD runs as an **icon in the notification area** (possibly under ^). Click it to open the menu:
 
-| Menüpunkt | Wirkung |
+| Menu item | Effect |
 |---|---|
-| Status | z. B. „Verbunden: Galaxy Tab S6 Lite · 2000×1200 · 60 Hz“ |
-| Auf dem Tablet anzeigen | App öffnen, nachdem sie auf dem Tablet geschlossen wurde |
-| Geräte | alle bekannten Geräte; Haken = als Bildschirm verwenden, Klick schaltet um. Neue Geräte stehen hier mit „Neu: … – als Bildschirm verwenden“ |
-| Ton zum Tablet übertragen | Ton-Übertragung ein/aus |
-| Touch und Stift am Tablet | Finger und S Pen bedienen Windows auf dem Tablet-Monitor (Standard: an) |
-| Info-Anzeige auf dem Tablet | Bilder/s, Datenrate, Dekodierzeit und USB-Laufzeit oben links (Standard: aus) |
-| Tablet mit dem PC-Bildschirm aus- und einschalten | Geht der PC-Bildschirm aus oder wird der PC gesperrt, geht auch das Tablet-Display aus – und wieder an (Standard: an) |
-| Selfie-Kamera des Tablets als Webcam | legt in Windows die Kamera „USBCD Tablet Webcam“ an (Standard: aus) – siehe unten |
-| „Nicht stören“ auf dem Tablet, solange es Monitor ist | keine Benachrichtigungen über dem Bild; danach wie vorher. Braucht einmal die Erlaubnis auf dem Tablet (Standard: aus) |
-| Lautstärketasten des Tablets regeln den Tablet-Lautsprecher | die Tasten am Tablet stellen „USBCD Tablet Lautsprecher“ in Windows lauter/leiser, mit Anzeige auf dem Tablet (Standard: an) |
-| Tablet ausschalten (Bild und Ton) | Tablet-Monitor weg, Tablet-Display aus, ohne das Kabel zu ziehen; derselbe Menüpunkt schaltet wieder ein |
-| Bildqualität | Sparsam (10 Mbit/s) · Standard (automatisch) · Hoch (40 Mbit/s) |
-| Tablet-Helligkeit | 100 % · 75 % · 50 % · 25 % – wirkt sofort |
-| Soundeinstellungen / Anzeigeeinstellungen | öffnet die Windows-Einstellungen |
-| Einstellungen und Log öffnen | Ordner mit `usbcd.toml` und `usbcd.log` |
-| Beim Anmelden automatisch starten | Autostart ein/aus |
-| USBCD beenden | |
+| Status | e.g. "Connected: Galaxy Tab S6 Lite · 2000×1200 · 60 Hz" |
+| Show on tablet | open the app again after it was closed on the tablet |
+| Devices | all known devices; check mark = use as screen, click toggles. New devices appear as “New: … – use as screen” |
+| Send sound to tablet | sound transmission on/off |
+| Touch and pen on the tablet | fingers and S Pen operate Windows on the tablet monitor (default: on) |
+| Info overlay on the tablet | frames/s, data rate, decode time and USB round trip at the top left (default: off) |
+| Turn tablet off and on with the PC screen | when the PC screen turns off or the PC is locked, the tablet display turns off too – and back on (default: on) |
+| Tablet selfie camera as webcam | adds the camera “USBCD Tablet Webcam” to Windows (default: off) – see below |
+| “Do not disturb” on the tablet while it is a monitor | no notifications over the picture; afterwards as before. Needs a one-time permission on the tablet (default: off) |
+| Tablet volume buttons control the tablet speakers | the tablet buttons turn “USBCD Tablet Speakers” in Windows up/down, shown on the tablet (default: on) |
+| Switch tablet off (picture and sound) | removes the tablet monitor and turns the tablet display off without unplugging; the same item switches it back on |
+| Picture quality | Data saver (10 Mbit/s) · Standard (automatic) · High (40 Mbit/s) |
+| Tablet brightness | 100 % · 75 % · 50 % · 25 % – applies immediately |
+| Sound settings / Display settings | opens the Windows settings |
+| Open settings and log | folder with `usbcd.toml` and `usbcd.log` |
+| Start automatically at sign-in | autostart on/off |
+| Quit USBCD | |
 
-**Verhalten:**
-* **Neues Gerät:** USBCD installiert oder startet nichts ungefragt. Es erscheint die Benachrichtigung „Neues Gerät
-  erkannt“ mit *Als Bildschirm verwenden* und *Nie für dieses Gerät*. Ignorierst du sie, passiert nichts. Die Antwort
-  gilt dauerhaft für dieses Gerät und ist im Menü unter *Geräte* änderbar. Geräte, auf denen die USBCD-App schon
-  installiert ist, gelten als zugelassen. Emulatoren und WLAN-Debugging werden nie angefasst.
-* Bei zugelassenen Geräten öffnet sich die App beim Anstecken automatisch; Windows meldet „Tablet verbunden“.
-* Benachrichtigungen kommen von „USBCD“ mit Logo; Statusmeldungen leise, Fehler mit Ton und „Log öffnen“.
-* **Hintergrundbild:** Windows verliert beim Hinzufügen/Entfernen virtueller Monitore gern das Hintergrundbild
-  (schwarzer Desktop). USBCD merkt sich vorher das Bild jedes Bildschirms und setzt es danach wieder; der
-  Tablet-Monitor bekommt das Bild des Hauptbildschirms. Diashow, Windows-Blickpunkt und einfarbige Hintergründe
-  bleiben unangetastet.
-* Schließt du die App, bleibt sie zu – fortsetzen über *Auf dem Tablet anzeigen* oder die App selbst öffnen.
-* Kurze USB-Aussetzer werden in ~2 s still überbrückt; der Monitor bleibt bestehen.
-* Ohne Verbindung zeigt das Tablet einen ruhigen, animierten Hintergrund mit Status – nie das eingefrorene letzte Bild.
-* Probleme (USB-Debugging nicht erlaubt, App fehlt, Übertragungsfehler) meldet Windows mit dem nächsten Schritt.
-* Die Lautstärke des Tablets wird nicht verändert.
+**Behaviour:**
+* **New device:** USBCD installs or starts nothing without asking. A "New device detected" notification offers
+  *Use as screen* and *Never for this device*. If you ignore it, nothing happens. The answer is remembered for this
+  device and can be changed in the menu under *Devices*. Devices that already have the USBCD app count as allowed.
+  Emulators and wireless debugging are never touched.
+* For allowed devices the app opens automatically when connected; Windows shows "Tablet connected".
+* Notifications come from "USBCD" with its logo; status messages are silent, errors play a sound and offer "Open log".
+* **Wallpaper:** Windows often loses the wallpaper when virtual monitors are added or removed (black desktop). USBCD
+  remembers each screen's picture beforehand and sets it again afterwards; the tablet monitor gets the main screen's
+  picture. Slideshows, Windows Spotlight and solid-colour backgrounds are left alone.
+* If you close the app, it stays closed – continue via *Show on tablet* or open the app yourself.
+* Short USB dropouts are bridged silently in ~2 s; the monitor stays.
+* Without a connection the tablet shows a calm animated background with status – never the frozen last frame.
+* Problems (USB debugging not allowed, app missing, transmission errors) are reported by Windows with the next step.
+* The tablet's volume is not changed.
 
-**Touch und S Pen:** Der Stift kommt in Windows als echter Stift an – mit Druckstufen, Schweben (der Mauszeiger
-folgt dem Stift, ohne zu klicken), Seitentaste (= Rechtsklick) und, falls der Stift sie meldet, Neigung. Das gilt für
-alle Programme, die Windows-Stifteingabe („Windows Ink“) nutzen, z. B. Affinity, Krita, Photoshop, OneNote, Browser.
-Finger tippen, ziehen und scrollen wie auf einem Touch-Bildschirm. Liegt beim Zeichnen der Handballen auf, werden
-Finger bis kurz nach dem Absetzen des Stifts ignoriert.
-* Programme, die nur den alten WinTab-Treiber kennen, bekommen keinen Druck (dafür bräuchte es einen Treiber).
-* Fenster, die mit Administratorrechten laufen, lassen sich von Windows aus Sicherheitsgründen nicht per Touch/Stift
-  bedienen (z. B. Benutzerkontensteuerung).
-* Samsung öffnet beim Drücken der S-Pen-Taste im Schweben „Air Command“. Wer die Taste als Rechtsklick will, schaltet
-  das unter *Einstellungen → Erweiterte Funktionen → S Pen → Air Command* ab.
+**Touch and S Pen:** the pen arrives in Windows as a real pen – with pressure, hover (the cursor follows the pen
+without clicking), side button (= right-click) and, if the pen reports it, tilt. This works in every program that uses
+Windows pen input ("Windows Ink"), e.g. Affinity, Krita, Photoshop, OneNote, browsers. Fingers tap, drag and scroll
+like on a touch screen. If your palm rests on the screen while drawing, fingers are ignored until shortly after the
+pen is lifted.
+* Programs that only know the old WinTab driver get no pressure (that would need a driver).
+* For security reasons Windows does not let touch/pen operate windows running with administrator rights (e.g. UAC).
+* Samsung opens "Air Command" when the S Pen button is pressed while hovering. If you want the button as right-click,
+  turn that off under *Settings → Advanced features → S Pen → Air Command*.
 
-**Webcam:** Mit *Selfie-Kamera des Tablets als Webcam* erscheint in Windows 11 die Kamera „USBCD Tablet Webcam“.
-Du wählst sie in der jeweiligen App selbst aus (Teams, Discord, Zoom, Browser, Windows-Kamera-App) – USBCD macht sie
-nie zur Standardkamera und benutzt ausschließlich die Frontkamera, nie die Rückkamera.
-* Die Kamera des Tablets läuft nur, während eine App die Webcam wirklich benutzt (Android zeigt dann den grünen
-  Kamera-Punkt). Sonst ist sie aus.
-* Beim ersten Einschalten fragt das Tablet einmal „Kamerazugriff erlauben?“.
-* Ohne Bild (Tablet nicht verbunden, ausgeschaltet, Zugriff verweigert) zeigt die Webcam ein Hinweisbild.
-* Bild: 1280×720, bis 30 Bilder/s. Die Kamera existiert nur, solange USBCD läuft, und nur für deinen Windows-Benutzer.
-* Microsoft Teams ist bei virtuellen Kameras allgemein wählerisch (auch bei OBS & Co.). Klappt es dort nicht, liegt
-  das an Teams; in Discord, Zoom und im Browser sollte die Webcam normal laufen.
+**Webcam:** with *Tablet selfie camera as webcam*, Windows 11 gets the camera “USBCD Tablet Webcam”. You pick it
+yourself in each app (Teams, Discord, Zoom, browser, Windows Camera app) – USBCD never makes it the default camera and
+only ever uses the front camera, never the rear camera.
+* The tablet camera only runs while an app actually uses the webcam (Android then shows the green camera dot).
+  Otherwise it is off.
+* The first time, the tablet asks once “Allow camera access?”.
+* Without a picture (tablet not connected, switched off, access denied) the webcam shows a hint image.
+* Picture: 1280×720, up to 30 frames/s. The camera only exists while USBCD runs, and only for your Windows user.
+* Microsoft Teams is picky about virtual cameras in general (OBS & co. too). If it does not work there, that is down
+  to Teams; in Discord, Zoom and the browser the webcam should work normally.
 
-**Tablet-Display mit dem PC:** Das Display geht wirklich aus (nicht nur dunkel) und kommt beim Aufwecken bzw.
-Entsperren des PCs von selbst wieder. Bild und Ton laufen in der Zeit weiter; der Tablet-Monitor bleibt in Windows,
-deine Fenster bleiben also, wo sie sind. Ist am Tablet eine Displaysperre eingerichtet, erscheint USBCD trotzdem
-direkt über dem Sperrbildschirm.
+**Tablet display with the PC:** the display really turns off (not just dark) and comes back by itself when the PC
+wakes up or is unlocked. Picture and sound keep running meanwhile; the tablet monitor stays in Windows, so your
+windows stay where they are. If the tablet has a screen lock, USBCD still appears directly above the lock screen.
 
-## Weitere Einstellungen
+## Troubleshooting
 
-`%LOCALAPPDATA%\USBCD\usbcd.toml` (Menü → *Einstellungen und Log öffnen*). Die wichtigsten Werte stellt das Menü ein.
+Everything is in `usbcd.log` (menu → *Open settings and log*). Start menu → **USBCD – Diagnosis** collects all
+important details in `diagnose.txt`. The service and the setup log to `C:\ProgramData\USBCD`.
 
-| Schlüssel | Standard | Bedeutung |
-|---|---|---|
-| `encoder` | `"auto"` | `nvenc` / `amf` / `qsv` / `software` |
-| `codec` | `"auto"` | `hevc` / `avc` |
-| `bitrate_mbps` | `0` | 0 = automatisch (20–80 Mbit/s) |
-| `max_fps` | `0` | 0 = Tablet-Maximum |
-| `tablet_brightness` | `100` | Helligkeit des Tablets in % |
-| `audio_enabled` | `true` | Ton übertragen |
-| `audio_device_rename` | `"USBCD Tablet Lautsprecher"` | Name des Lautsprechers in Windows |
-| `auto_switch_audio` | `false` | Tablet-Lautsprecher beim Anstecken automatisch zum Standard machen |
-| `volume_mode` | `"auto"` | `manual` / `off`, falls die Windows-Lautstärke doppelt bzw. gar nicht wirkt |
-| `hide_cable_output` | `true` | Aufnahmeseite „CABLE Output“ ausblenden (Programme können den Tablet-Ton dann nicht als Mikrofon aufnehmen) |
-| `display_position` | – | Wird automatisch gemerkt, wenn du den Tablet-Monitor in den Windows-Anzeigeeinstellungen verschiebst; Zeile löschen = wieder „rechts daneben“ |
-| `tablet_input` | `true` | Touch und S Pen steuern Windows (auch im Menü) |
-| `show_stats` | `false` | Info-Anzeige auf dem Tablet (auch im Menü) |
-| `follow_pc_power` | `true` | Tablet-Display mit dem PC-Bildschirm aus/an (auch im Menü) |
-| `webcam` | `false` | Selfie-Kamera des Tablets als Webcam (auch im Menü) |
-| `tablet_dnd` | `false` | „Nicht stören“ auf dem Tablet, solange es Monitor ist (auch im Menü) |
-| `tablet_volume_keys` | `true` | Lautstärketasten des Tablets regeln den Tablet-Lautsprecher (auch im Menü) |
-| `sparse_frames` | `true` | Bilder nur bei Änderungen senden – nur bei Tablets, deren Dekoder jedes Bild sofort ausgibt (prüft die App selbst); spart Grafikkarte, USB und Tablet-Akku |
+* **"Helper service missing":** run the setup again (*Services* → "USBCD Helper" must be *Running*).
+* **"Security warning: another app … pretends to be USBCD":** check the tablet for unknown apps and restart it.
+  The tablet then shows "Connection blocked".
 
-## Fehlersuche
+* **No picture / it stops:** try menu → *Picture quality → Data saver*; otherwise `encoder = "software"` in `usbcd.toml`.
+* **Monitor does not appear:** Device Manager → *Display adapters* must list "Virtual Display Driver"
+  (intentionally disabled while no tablet is connected).
+* **No sound:** is "USBCD Tablet Speakers" selected in Windows and *Send sound to tablet* on?
+* **App cannot be installed:** follow the notification; uninstall an old app on the tablet if needed.
 
-Alles steht in `usbcd.log` (Menü → *Einstellungen und Log öffnen*). Startmenü → **USBCD – Diagnose** sammelt alle
-wichtigen Angaben in `diagnose.txt`. Dienst und Setup protokollieren nach `C:\ProgramData\USBCD`.
+**Uninstall:** *Settings → Apps → USBCD*. Removes program, helper service, monitor device and its driver package,
+autostart, Start menu entries, settings, logs (`%LOCALAPPDATA%\USBCD`, `C:\ProgramData\USBCD`) and
+`C:\VirtualDisplayDriver`. It asks whether VB-CABLE and the app on the connected tablet should go too; if VB-CABLE
+stays, it is reset to its original state. Parsec and other virtual monitors stay untouched. Kept on purpose: the adb
+key `%USERPROFILE%\.android` (shared with Android Studio) and the source folder including `installer\keys\`.
 
-* **„Hilfsdienst fehlt“:** Setup erneut ausführen (*Dienste* → „USBCD Helper“ muss *Wird ausgeführt* zeigen).
-* **„Sicherheitswarnung: Eine andere App … gibt sich als USBCD aus“:** Unbekannte Apps auf dem Tablet prüfen und
-  das Tablet neu starten. Das Tablet zeigt in diesem Fall „Verbindung blockiert“.
+## Limits
 
-* **Bild kommt nicht / bricht ab:** Menü → *Bildqualität → Sparsam* testen; sonst `encoder = "software"`.
-* **Monitor erscheint nicht:** Im Geräte-Manager unter *Grafikkarten* muss „Virtual Display Driver“ stehen
-  (ohne Tablet absichtlich deaktiviert).
-* **Kein Ton:** Ist in Windows „USBCD Tablet Lautsprecher“ gewählt und *Ton zum Tablet übertragen* an?
-* **App lässt sich nicht installieren:** Meldung beachten; ggf. alte App auf dem Tablet deinstallieren.
+* USB debugging must stay on.
+* Latency typically 1–3 frames – fine for office work, video and most games.
+* One tablet at a time; pressure only in programs with Windows pen input (not WinTab).
+* Windows menus and notifications use the system font (Space Grotesk only in the tablet app).
 
-**Deinstallieren:** *Einstellungen → Apps → USBCD*. Entfernt Programm, Hilfsdienst, Monitor-Gerät samt
-Treiberpaket, Autostart, Startmenü-Einträge, Einstellungen, Logs (`%LOCALAPPDATA%\USBCD`, `C:\ProgramData\USBCD`)
-und `C:\VirtualDisplayDriver`. Es fragt, ob auch VB-CABLE und die App auf dem angeschlossenen Tablet weg sollen;
-bleibt VB-CABLE, wird es auf den Auslieferungszustand zurückgesetzt. Parsec und andere virtuelle Monitore bleiben
-unberührt. Bewusst erhalten bleiben: der adb-Schlüssel `%USERPROFILE%\.android` (teilt sich USBCD mit Android
-Studio) und der Quellcode-Ordner samt `installer\keys\`.
+## Building from source
 
-## Grenzen
-
-* USB-Debugging muss an bleiben.
-* Latenz typisch 1–3 Bilder – gut für Büro, Video und die meisten Spiele.
-* Ein Tablet gleichzeitig; Druckstufen nur in Programmen mit Windows-Stifteingabe (nicht WinTab).
-* Windows-Menüs und -Benachrichtigungen verwenden die Systemschrift (Space Grotesk nur in der Tablet-App).
-
-## Selbst bauen
-
-**Benötigt:**
+**Requires:**
 * [Rust](https://rustup.rs) (stable)
-* [Android Studio](https://developer.android.com/studio) – bringt Android-SDK und Java 17 mit. Den Ordner `android` einmal öffnen und synchronisieren.
-* [Inno Setup](https://jrsoftware.org/isinfo.php) 6.6 oder neuer – fehlt es, installiert das Build-Skript es per winget.
+* [Android Studio](https://developer.android.com/studio) – brings the Android SDK and Java 17. Open the `android` folder once and let it sync.
+* [Inno Setup](https://jrsoftware.org/isinfo.php) 6.6 or newer – if it is missing, the build script installs it via winget.
 
-**Bauen:**
-1. Im Ordner `installer` auf **`Setup bauen.cmd`** doppelklicken. Das Skript baut das Windows-Programm **und die
-   Tablet-App**, lädt beim ersten Mal FFmpeg, adb und den Monitor-Treiber und erzeugt
-   **`installer\Output\USBCD-Setup-<version>.exe`**. Bei Fehlern bleibt das Fenster offen (Protokoll: `installer\build.log`).
-2. Beim ersten Bauen entsteht in `installer\keys\` ein eigener Signaturschlüssel für die Tablet-App. **Sichern und nie
-   hochladen** (steht in `.gitignore`). Selbst gebaute Apps sind damit anders signiert als die aus den Releases; beim
-   Wechsel ersetzt USBCD die App auf dem Tablet.
+**Build:**
+1. In the `installer` folder, double-click **`Setup bauen.cmd`**. It builds the Windows program **and the tablet app**,
+   downloads FFmpeg, adb and the monitor driver the first time, and creates
+   **`installer\Output\USBCD-Setup-<version>.exe`**. On errors the window stays open (log: `installer\build.log`).
+2. The first build creates your own signing key for the tablet app in `installer\keys\`. **Back it up and never
+   upload it** (it is in `.gitignore`). Apps you build are therefore signed differently from the release builds;
+   when you switch, USBCD replaces the app on the tablet.
 
-Die Fremdprogramme (FFmpeg, adb, Monitor-Treiber) liegen nicht im Repository. Das Build-Skript lädt sie von den
-Herstellern, prüft ihre Signaturen und vergleicht sie mit den Prüfsummen in `installer\deps.lock.json`.
-Die Tablet-App lässt sich auch direkt über Android Studio installieren (Ordner `android` öffnen → ▶ Run).
+The third-party programs (FFmpeg, adb, monitor driver) are not part of the repository. The build script downloads
+them from their publishers, checks their signatures and compares them with the checksums in `installer\deps.lock.json`.
+You can also install the tablet app directly from Android Studio (open the `android` folder → ▶ Run).
 
-## Aufbau
+## Project structure
 
 ```
-android/    Android-Studio-Projekt (Kotlin, keine Fremdbibliotheken)
-            MainActivity (Wartebildschirm, Helligkeit), GradientBackground, Fonts,
+android/    Android Studio project (Kotlin, no third-party libraries)
+            MainActivity (waiting screen, brightness), GradientBackground, Fonts,
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
-            res/values (Englisch), res/values-de (Deutsch), adaptives Icon mit Monochrom-Ebene
-host/       Rust: main (Geräte-Schleife, App-Installation), tray (Menü), session, helper (Dienst
-            und Zugang), auth (Anmeldung), vdd, display, driver, video, nal, audio, autostart,
+            res/values (English), res/values-de (German), adaptive icon with monochrome layer
+host/       Rust: main (device loop, app installation), tray (menu), session, helper (service
+            and access), auth (pairing), vdd, display, driver, video, nal, audio, autostart,
             i18n, config, proto, adb, util
 installer/  Setup bauen.cmd · build-installer.ps1 · USBCD.iss (de/en) · setup-helper.ps1 · diagnose.ps1
-            · deps.lock.json (Prüfsummen) · Erklärseiten · THIRD-PARTY.txt
+            · deps.lock.json (checksums) · info pages · THIRD-PARTY.txt
 ```
 
-## Mitmachen
+## Contributing
 
-Fehler und Ideen gern als [Issue](../../issues). Bei Fehlern hilft die Datei `diagnose.txt` (Startmenü →
-**USBCD – Diagnose**) oder `usbcd.log` – vor dem Hochladen kurz durchsehen, ob etwas Persönliches drinsteht.
-Pull Requests sind willkommen; alle sichtbaren Texte gibt es auf Deutsch und Englisch.
+Bug reports and ideas are welcome as [issues](../../issues). For bugs, `diagnose.txt` (Start menu →
+**USBCD – Diagnosis**) or `usbcd.log` helps – look through it before uploading in case it contains anything personal.
+Pull requests are welcome; all visible text exists in German and English.
 
-## Lizenz
+## License
 
-Copyright © 2026 Samuel E. Ramirez. USBCD ist freie Software unter der
-[GNU General Public License v3.0 oder später](LICENSE). Fremdkomponenten (FFmpeg, adb, Virtual Display Driver,
-Space Grotesk, VB-CABLE) und ihre Lizenzen: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
+Copyright © 2026 Samuel E. Ramirez. USBCD is free software under the
+[GNU General Public License v3.0 or later](LICENSE). Third-party components (FFmpeg, adb, Virtual Display Driver,
+Space Grotesk, VB-CABLE) and their licenses: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
 
-Samsung, Galaxy, Android, Windows und weitere genannte Namen sind Marken ihrer Inhaber. USBCD ist ein unabhängiges
-Projekt und steht in keiner Verbindung zu diesen Unternehmen.
+Samsung, Galaxy, Android, Windows and other names mentioned are trademarks of their respective owners. USBCD is an
+independent project and is not affiliated with these companies.

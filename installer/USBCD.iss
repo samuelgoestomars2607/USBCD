@@ -129,8 +129,8 @@ Source: "USBCD-logo.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "THIRD-PARTY.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\host\assets\USBCDGrotesk-OFL.txt"; DestDir: "{app}"; DestName: "OFL.txt"; Flags: ignoreversion
-Source: "..\README.md"; DestDir: "{app}"; DestName: "LIESMICH.md"; Flags: ignoreversion; Languages: de
-Source: "..\README.en.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion; Languages: en
+Source: "..\README.de.md"; DestDir: "{app}"; DestName: "LIESMICH.md"; Flags: ignoreversion; Languages: de
+Source: "..\README.md"; DestDir: "{app}"; DestName: "README.md"; Flags: ignoreversion; Languages: en
 
 [Icons]
 ; startet USBCD bzw. lässt die laufende Instanz ihre Info-Blase zeigen
