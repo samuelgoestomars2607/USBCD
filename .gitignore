@@ -31,6 +31,13 @@ installer/Output/
 # Fremdprogramme (ffmpeg, adb, Monitor-Treiber) und die gebaute App.
 # build-installer.ps1 lädt sie selbst und prüft sie gegen deps.lock.json.
 installer/deps/
+# Gebaute Apps, auch aus Android Studio („Generate Signed App Bundle/APK“)
+android/app/release/
+*.apk
+*.aab
+*.idsig
+# Diagnose-Ausgabe von USBCD (enthält Geräte- und Benutzerdaten)
+diagnose.txt
 
 # ── System ───────────────────────────────────────────────────────────────
 Thumbs.db
