@@ -183,7 +183,9 @@ key `%USERPROFILE%\.android` (shared with Android Studio) and the source folder 
    when you switch, USBCD replaces the app on the tablet.
 
 The third-party programs (FFmpeg, adb, monitor driver) are not part of the repository. The build script downloads
-them from their publishers, checks their signatures and compares them with the checksums in `installer\deps.lock.json`.
+fixed versions – FFmpeg and adb from the [build-deps-1](../../releases/tag/build-deps-1) release, the monitor driver from
+its own project –, checks their signatures and compares them with the checksums in `installer\deps.lock.json`.
+That way everyone builds with exactly the same files.
 You can also install the tablet app directly from Android Studio (open the `android` folder → ▶ Run).
 
 ## Project structure

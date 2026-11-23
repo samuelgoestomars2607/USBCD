@@ -223,8 +223,10 @@ Studio) und der Quellcode-Ordner samt `installer\keys\`.
    hochladen** (steht in `.gitignore`). Selbst gebaute Apps sind damit anders signiert als die aus den Releases; beim
    Wechsel ersetzt USBCD die App auf dem Tablet.
 
-Die Fremdprogramme (FFmpeg, adb, Monitor-Treiber) liegen nicht im Repository. Das Build-Skript lädt sie von den
-Herstellern, prüft ihre Signaturen und vergleicht sie mit den Prüfsummen in `installer\deps.lock.json`.
+Die Fremdprogramme (FFmpeg, adb, Monitor-Treiber) liegen nicht im Repository. Das Build-Skript lädt sie in festen
+Versionen – FFmpeg und adb aus dem Release [build-deps-1](../../releases/tag/build-deps-1), den Monitor-Treiber aus
+seinem eigenen Projekt –, prüft ihre Signaturen und vergleicht sie mit den Prüfsummen in `installer\deps.lock.json`.
+So baut jeder mit exakt denselben Dateien.
 Die Tablet-App lässt sich auch direkt über Android Studio installieren (Ordner `android` öffnen → ▶ Run).
 
 ## Aufbau

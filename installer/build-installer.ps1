@@ -6,9 +6,12 @@
 # Inno Setup kompilieren (wird bei Bedarf per winget installiert).
 # Ergebnis: installer\Output\USBCD-Setup-<version>.exe
 #
+# Feste Versionen: FFmpeg und adb kommen aus dem Release „build-deps-1“ dieses Projekts
+# (adb zuerst direkt von Google), der Monitor-Treiber aus einem festen Release seines
+# Projekts. So baut jeder mit exakt denselben Dateien.
 # Prüfung der Abhängigkeiten: Signaturen (adb von Google, Monitor-Treiber) und SHA-256-
-# Prüfsummen in deps.lock.json. Beim ersten Bauen werden die Prüfsummen gemerkt; ändert
-# sich danach eine Datei, bricht der Build ab (bewusstes Update: -UpdateDeps).
+# Prüfsummen in deps.lock.json. Weicht eine Datei ab, bricht der Build ab
+# (bewusstes Update auf neue Versionen: URLs unten ändern und -UpdateDeps).
 #
 # Optional: Code-Signatur von USBCD.exe und Setup mit einem eigenen Zertifikat:
 #   $env:USBCD_SIGN_CERT_THUMBPRINT = '<SHA1-Fingerabdruck im Zertifikatspeicher>'
@@ -35,6 +38,8 @@ $here = Split-Path -Parent $PSCommandPath
 $repo = Split-Path -Parent $here
 $deps = Join-Path $here 'deps'
 $tmp = Join-Path $env:TEMP 'USBCD-build'
+# Release mit den festen Fremdprogrammen (FFmpeg samt Quellcode, adb)
+$depsRelease = 'https://github.com/samuelgoestomars2607/USBCD/releases/download/build-deps-1'
 if ($Refresh) { Remove-Item $deps -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $deps, $tmp | Out-Null
 
@@ -110,9 +115,9 @@ if (-not $ok) { throw 'cargo build fehlgeschlagen' }
 if (-not (Test-Path (Join-Path $repo 'host\target\release\usbcd_cam.dll'))) { throw 'usbcd_cam.dll (Webcam) wurde nicht gebaut' }
 $version = (Select-String -Path (Join-Path $repo 'host\Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 
-# --- 2. FFmpeg (BtbN-Builds, GPL, statisch) ---
+# --- 2. FFmpeg (BtbN-Build N-129130-gcd39c36377, GPL, statisch) ---
 # Benötigt gfxcapture mit "dup_frames" (gleichmäßiger Bildstrom = geringe Verzögerung).
-# Das steckt erst in den aktuellen Entwicklerversionen, daher "master" zuerst.
+# Feste Version aus dem Release build-deps-1; dort liegt auch ihr Quellcode (GPL).
 if (Test-Path "$deps\ffmpeg.exe") {
     $ErrorActionPreference = 'Continue'
     $chk = & "$deps\ffmpeg.exe" -hide_banner -h filter=gfxcapture 2>&1 | Out-String
@@ -125,10 +130,7 @@ if (Test-Path "$deps\ffmpeg.exe") {
 if (-not (Test-Path "$deps\ffmpeg.exe")) {
     Step 'FFmpeg herunterladen'
     $zip = "$tmp\ffmpeg.zip"
-    Get-FirstUrl @(
-        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
-        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-9.0.zip'
-    ) $zip
+    Get-FirstUrl @("$depsRelease/ffmpeg-N-129130-gcd39c36377-win64-gpl.zip") $zip
     Remove-Item "$tmp\ffmpeg" -Recurse -Force -ErrorAction SilentlyContinue
     Expand-Archive $zip "$tmp\ffmpeg" -Force
     $exe = Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
@@ -144,7 +146,11 @@ if ($ff -notmatch 'gfxcapture' -or $ff -match 'Unknown filter') { throw 'FFmpeg 
 if (-not (Test-Path "$deps\platform-tools\adb.exe")) {
     Step 'Android Platform-Tools herunterladen'
     $zip = "$tmp\platform-tools.zip"
-    Get-FirstUrl @('https://dl.google.com/android/repository/platform-tools-latest-windows.zip') $zip
+    # feste Version 37.0.3: zuerst von Google, sonst aus dem Release build-deps-1
+    Get-FirstUrl @(
+        'https://dl.google.com/android/repository/platform-tools_r37.0.3-win.zip',
+        "$depsRelease/platform-tools_r37.0.3-win.zip"
+    ) $zip
     Expand-Archive $zip $deps -Force   # enthält den Ordner platform-tools\
 }
 Assert-Signed "$deps\platform-tools\adb.exe" 'Google'

@@ -9,9 +9,11 @@ Virtual Display Driver (MttVDD)
   https://github.com/VirtualDrivers/Virtual-Display-Driver
   MIT License, Copyright (c) 2024 Virtual Display. Signed via SignPath Foundation.
 
-FFmpeg (ffmpeg.exe, GPL build by BtbN)
-  https://ffmpeg.org  –  build: https://github.com/BtbN/FFmpeg-Builds
-  GNU General Public License v3. Source: https://git.ffmpeg.org/ffmpeg.git
+FFmpeg (ffmpeg.exe, unmodified GPL build N-129130-gcd39c36377 by BtbN, 2026-11-19)
+  https://ffmpeg.org  –  build scripts: https://github.com/BtbN/FFmpeg-Builds
+  GNU General Public License v3. Source code of exactly this version / Quellcode genau dieser Version:
+  https://github.com/samuelgoestomars2607/USBCD/releases/tag/build-deps-1 (ffmpeg-source-cd39c36377.tar.gz)
+  https://github.com/FFmpeg/FFmpeg/tree/cd39c36377fcdac674fea5905cf633e6b8b8a471
 
 Android SDK Platform-Tools (adb)
   https://developer.android.com/tools/releases/platform-tools
