@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="installer/USBCD-logo.png" width="128" height="128" alt="USBCD-Logo">
+</p>
+
 # USBCD – Android-Tablet als zweiter Monitor mit Lautsprechern (USB-C, Windows 11)
 
 *English version: [README.md](README.md)*
