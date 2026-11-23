@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="waiting">Warte auf den PC …</string>
+    <string name="waiting_detail">Tablet per USB-C mit dem PC verbinden.\nUSB-Debugging muss eingeschaltet sein.\n\nDieses Display: %1$d × %2$d · %3$s Hz</string>
+    <string name="connected">Verbunden</string>
+    <string name="starting">%1$s\nBild wird gestartet …</string>
+    <string name="port_busy">Verbindung blockiert</string>
+    <string name="port_busy_detail">Eine andere App auf diesem Tablet belegt den USBCD-Anschluss.\nEs wird nichts angezeigt oder übertragen. Bitte unbekannte Apps\nprüfen und das Tablet neu starten.</string>
+    <string name="stats_format">%1$.0f Bilder/s · %2$.1f Mbit/s\nDekodieren %3$.1f ms · USB %4$.1f ms\n%5$s</string>
+    <string name="stats_wait">Messe …</string>
+    <string name="volume_level">Lautstärke %1$d %%</string>
+    <string name="volume_muted">Stumm</string>
+    <string name="dnd_permission">USBCD: Bitte Zugriff auf „Nicht stören“ erlauben, damit keine Benachrichtigungen über dem Bild erscheinen.</string>
+</resources>

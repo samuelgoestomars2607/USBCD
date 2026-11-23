@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">USBCD</string>
+    <string name="waiting">Waiting for the PC …</string>
+    <string name="waiting_detail">Connect the tablet to the PC via USB-C.\nUSB debugging must be turned on.\n\nThis display: %1$d × %2$d · %3$s Hz</string>
+    <string name="connected">Connected</string>
+    <string name="starting">%1$s\nStarting picture …</string>
+    <string name="port_busy">Connection blocked</string>
+    <string name="port_busy_detail">Another app on this tablet is using the USBCD connection.\nNothing is shown or transmitted. Please check for unknown apps\nand restart the tablet.</string>
+    <string name="stats_format">%1$.0f fps · %2$.1f Mbit/s\nDecode %3$.1f ms · USB %4$.1f ms\n%5$s</string>
+    <string name="stats_wait">Measuring …</string>
+    <string name="volume_level">Volume %1$d %%</string>
+    <string name="volume_muted">Muted</string>
+    <string name="dnd_permission">USBCD: Please allow “Do Not Disturb” access so notifications don’t cover the screen.</string>
+</resources>

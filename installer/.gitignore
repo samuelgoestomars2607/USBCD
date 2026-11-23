@@ -1,0 +1,5 @@
+deps/
+Output/
+build.log
+# Release-Schlüssel der Tablet-App – nie einchecken oder weitergeben
+keys/

@@ -1,0 +1,887 @@
+//! Symbol im Infobereich der Taskleiste mit Menü.
+//! Läuft im Hauptthread; die Tablet-Erkennung arbeitet in einem eigenen Thread.
+
+use crate::i18n::tr;
+use crate::util::{set_shutdown, status, wide};
+use std::mem::{size_of, zeroed};
+use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Shell::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+const WM_TRAY: u32 = WM_APP + 1;
+const WM_SHOW_INFO: u32 = WM_APP + 2;
+const WM_NOTE: u32 = WM_APP + 3;
+const TIMER_ID: usize = 1;
+
+const ID_STATUS: usize = 1;
+const ID_SOUND: usize = 2;
+const ID_DISPLAY: usize = 3;
+const ID_FOLDER: usize = 4;
+const ID_QUIT: usize = 5;
+const ID_LAUNCH: usize = 6;
+
+static HWND_G: AtomicUsize = AtomicUsize::new(0);
+static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+static ICON: AtomicUsize = AtomicUsize::new(0);
+static BIG_ICON: AtomicUsize = AtomicUsize::new(0);
+static PENDING: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Ersatz, wenn Windows-Benachrichtigungen nicht gehen: Info-Blase mit USBCD-Logo
+/// (aus beliebigem Thread; wird angezeigt, sobald das Symbol existiert).
+pub fn balloon_fallback(title: &str, text: &str) {
+    if let Ok(mut g) = PENDING.lock() {
+        g.push((title.to_string(), text.to_string()));
+    }
+    let h = HWND_G.load(Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            PostMessageW(h as HWND, WM_NOTE, 0, 0);
+        }
+    }
+}
+
+fn copy_wstr(dst: &mut [u16], s: &str) {
+    let w: Vec<u16> = s.encode_utf16().take(dst.len() - 1).collect();
+    dst[..w.len()].copy_from_slice(&w);
+    dst[w.len()] = 0;
+}
+
+unsafe fn nid(hwnd: HWND) -> NOTIFYICONDATAW {
+    let mut n: NOTIFYICONDATAW = zeroed();
+    n.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    n.hWnd = hwnd;
+    n.uID = 1;
+    n
+}
+
+unsafe fn add_icon(hwnd: HWND) {
+    let mut n = nid(hwnd);
+    n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    n.uCallbackMessage = WM_TRAY;
+    n.hIcon = ICON.load(Ordering::Relaxed) as HICON;
+    copy_wstr(&mut n.szTip, &tooltip());
+    Shell_NotifyIconW(NIM_ADD, &n);
+}
+
+fn tooltip() -> String {
+    format!("USBCD – {}", status())
+}
+
+unsafe fn update_tip(hwnd: HWND) {
+    // nur bei Änderung an Windows geben (läuft jede Sekunde)
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let tip = tooltip();
+    if let Ok(mut last) = LAST.lock() {
+        if *last == tip {
+            return;
+        }
+        *last = tip.clone();
+    }
+    let mut n = nid(hwnd);
+    n.uFlags = NIF_TIP;
+    copy_wstr(&mut n.szTip, &tip);
+    Shell_NotifyIconW(NIM_MODIFY, &n);
+}
+
+unsafe fn balloon(hwnd: HWND, title: &str, text: &str) {
+    let mut n = nid(hwnd);
+    n.uFlags = NIF_INFO;
+    // eigenes Logo statt des blauen Windows-„i“
+    let big = BIG_ICON.load(Ordering::Relaxed);
+    if big != 0 {
+        n.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON | NIIF_NOSOUND;
+        n.hBalloonIcon = big as HICON;
+    } else {
+        n.dwInfoFlags = NIIF_USER | NIIF_NOSOUND;
+    }
+    copy_wstr(&mut n.szInfoTitle, title);
+    copy_wstr(&mut n.szInfo, text);
+    Shell_NotifyIconW(NIM_MODIFY, &n);
+}
+
+fn open(target: &str) {
+    let op = wide("open");
+    let t = wide(target);
+    unsafe {
+        ShellExecuteW(
+            null_mut(),
+            op.as_ptr(),
+            t.as_ptr(),
+            null(),
+            null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+// Menü-IDs der Einstellungen
+const ID_AUDIO: usize = 10;
+const ID_Q_LOW: usize = 20;
+const ID_Q_STD: usize = 21;
+const ID_Q_HIGH: usize = 22;
+const ID_B_BASE: usize = 30; // 30..=33 → 100/75/50/25 %
+const BRIGHTNESS: [u32; 4] = [100, 75, 50, 25];
+const ID_AUTOSTART: usize = 40;
+const ID_INPUT: usize = 50;
+const ID_STATS: usize = 51;
+const ID_PAUSE: usize = 52;
+const ID_POWER: usize = 53;
+const ID_WEBCAM: usize = 54;
+const ID_DND: usize = 55;
+const ID_VOLKEYS: usize = 56;
+const ID_DEV_BASE: usize = 100; // 100.. → Geräte im Untermenü
+const ID_DEV_NONE: usize = 99;
+const COPYDATA_URI: usize = 0x5553_4244; // "USBD"
+
+/// Geräte, wie sie im zuletzt geöffneten Menü standen: (Seriennummer, Name, neuer Wert)
+static MENU_DEVICES: std::sync::Mutex<Vec<(String, String, bool)>> =
+    std::sync::Mutex::new(Vec::new());
+
+// Zustand von Bildschirm und Sperre (nur im Fenster-Thread geändert)
+static DISPLAY_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn update_dark() {
+    crate::util::set_pc_dark(DISPLAY_OFF.load(Ordering::Relaxed) || LOCKED.load(Ordering::Relaxed));
+}
+
+static AUTOSTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Beim Start ermittelt.
+pub fn set_autostart_known(on: bool) {
+    AUTOSTART.store(on, Ordering::Relaxed);
+}
+
+unsafe fn append(m: HMENU, flags: u32, id: usize, text: &str) {
+    let w = wide(text);
+    AppendMenuW(
+        m,
+        flags,
+        id,
+        if flags & MF_SEPARATOR != 0 {
+            null()
+        } else {
+            w.as_ptr()
+        },
+    );
+}
+
+fn check(on: bool) -> u32 {
+    if on {
+        MF_STRING | MF_CHECKED
+    } else {
+        MF_STRING
+    }
+}
+
+unsafe fn show_menu(hwnd: HWND) {
+    let mut pt: POINT = zeroed();
+    GetCursorPos(&mut pt);
+    let cfg = crate::config::current();
+
+    let quality = CreatePopupMenu();
+    append(
+        quality,
+        check(cfg.bitrate_mbps > 0 && cfg.bitrate_mbps <= 12),
+        ID_Q_LOW,
+        tr("Sparsam (10 Mbit/s)", "Data saver (10 Mbit/s)"),
+    );
+    append(
+        quality,
+        check(cfg.bitrate_mbps == 0),
+        ID_Q_STD,
+        tr("Standard (automatisch)", "Standard (automatic)"),
+    );
+    append(
+        quality,
+        check(cfg.bitrate_mbps > 12),
+        ID_Q_HIGH,
+        tr("Hoch (40 Mbit/s)", "High (40 Mbit/s)"),
+    );
+
+    let bright = CreatePopupMenu();
+    for (i, b) in BRIGHTNESS.iter().enumerate() {
+        append(
+            bright,
+            check(cfg.tablet_brightness == *b),
+            ID_B_BASE + i,
+            &format!("{b} %"),
+        );
+    }
+
+    // Geräte: neue zuerst, dann bekannte (Haken = als Bildschirm verwenden)
+    let devices = CreatePopupMenu();
+    let mut entries = Vec::new();
+    for (serial, name) in crate::util::pending_devices() {
+        if !cfg.devices.contains_key(&serial) {
+            entries.push((
+                format!(
+                    "{} {name} – {}",
+                    tr("Neu:", "New:"),
+                    tr("als Bildschirm verwenden", "use as screen")
+                ),
+                MF_STRING,
+                serial,
+                name,
+                true,
+            ));
+        }
+    }
+    for (serial, d) in &cfg.devices {
+        let label = if d.use_as_display {
+            d.name.clone()
+        } else {
+            format!("{} ({})", d.name, tr("nie verwenden", "never use"))
+        };
+        entries.push((
+            label,
+            check(d.use_as_display),
+            serial.clone(),
+            d.name.clone(),
+            !d.use_as_display,
+        ));
+    }
+    if entries.is_empty() {
+        append(
+            devices,
+            MF_STRING | MF_GRAYED,
+            ID_DEV_NONE,
+            tr(
+                "Noch keine Geräte angeschlossen",
+                "No devices connected yet",
+            ),
+        );
+    }
+    if let Ok(mut g) = MENU_DEVICES.lock() {
+        g.clear();
+        for (i, (label, flags, serial, name, new_value)) in entries.into_iter().enumerate() {
+            append(devices, flags, ID_DEV_BASE + i, &label);
+            g.push((serial, name, new_value));
+        }
+    }
+
+    let m = CreatePopupMenu();
+    append(m, MF_STRING | MF_GRAYED, ID_STATUS, &status());
+    append(m, MF_SEPARATOR, 0, "");
+    append(
+        m,
+        MF_STRING,
+        ID_LAUNCH,
+        tr("Auf dem Tablet anzeigen", "Show on tablet"),
+    );
+    append(
+        m,
+        MF_STRING | MF_POPUP,
+        devices as usize,
+        tr("Geräte", "Devices"),
+    );
+    append(
+        m,
+        check(cfg.audio_enabled),
+        ID_AUDIO,
+        tr("Ton zum Tablet übertragen", "Send sound to tablet"),
+    );
+    append(
+        m,
+        check(cfg.tablet_input),
+        ID_INPUT,
+        tr("Touch und Stift am Tablet", "Touch and pen on the tablet"),
+    );
+    append(
+        m,
+        check(cfg.show_stats),
+        ID_STATS,
+        tr("Info-Anzeige auf dem Tablet", "Info overlay on the tablet"),
+    );
+    append(
+        m,
+        check(cfg.follow_pc_power),
+        ID_POWER,
+        tr(
+            "Tablet mit dem PC-Bildschirm aus- und einschalten",
+            "Turn tablet off and on with the PC screen",
+        ),
+    );
+    append(
+        m,
+        check(cfg.webcam),
+        ID_WEBCAM,
+        tr(
+            "Selfie-Kamera des Tablets als Webcam",
+            "Tablet selfie camera as webcam",
+        ),
+    );
+    append(
+        m,
+        check(cfg.tablet_dnd),
+        ID_DND,
+        tr(
+            "„Nicht stören“ auf dem Tablet, solange es Monitor ist",
+            "“Do not disturb” on the tablet while it is a monitor",
+        ),
+    );
+    // wirkt nur, wenn der Ton zum Tablet geht
+    let volkeys_flags = if cfg.audio_enabled && cfg.volume_mode != "off" {
+        check(cfg.tablet_volume_keys)
+    } else {
+        check(cfg.tablet_volume_keys) | MF_GRAYED
+    };
+    append(
+        m,
+        volkeys_flags,
+        ID_VOLKEYS,
+        tr(
+            "Lautstärketasten des Tablets regeln den Tablet-Lautsprecher",
+            "Tablet volume buttons control the tablet speakers",
+        ),
+    );
+    append(
+        m,
+        MF_STRING,
+        ID_PAUSE,
+        if crate::util::paused() {
+            tr("Tablet wieder einschalten", "Switch tablet back on")
+        } else {
+            tr(
+                "Tablet ausschalten (Bild und Ton)",
+                "Switch tablet off (picture and sound)",
+            )
+        },
+    );
+    append(
+        m,
+        MF_STRING | MF_POPUP,
+        quality as usize,
+        tr("Bildqualität", "Picture quality"),
+    );
+    append(
+        m,
+        MF_STRING | MF_POPUP,
+        bright as usize,
+        tr("Tablet-Helligkeit", "Tablet brightness"),
+    );
+    append(m, MF_SEPARATOR, 0, "");
+    append(
+        m,
+        MF_STRING,
+        ID_SOUND,
+        tr(
+            "Soundeinstellungen (USBCD Tablet Lautsprecher wählen) …",
+            "Sound settings (choose USBCD Tablet Speakers) …",
+        ),
+    );
+    append(
+        m,
+        MF_STRING,
+        ID_DISPLAY,
+        tr("Anzeigeeinstellungen …", "Display settings …"),
+    );
+    append(
+        m,
+        MF_STRING,
+        ID_FOLDER,
+        tr("Einstellungen und Log öffnen", "Open settings and log"),
+    );
+    append(
+        m,
+        check(AUTOSTART.load(Ordering::Relaxed)),
+        ID_AUTOSTART,
+        tr(
+            "Beim Anmelden automatisch starten",
+            "Start automatically at sign-in",
+        ),
+    );
+    append(m, MF_SEPARATOR, 0, "");
+    append(m, MF_STRING, ID_QUIT, tr("USBCD beenden", "Quit USBCD"));
+
+    SetForegroundWindow(hwnd);
+    TrackPopupMenu(
+        m,
+        TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
+        pt.x,
+        pt.y,
+        0,
+        hwnd,
+        null(),
+    );
+    PostMessageW(hwnd, WM_NULL, 0, 0);
+    DestroyMenu(m); // zerstört auch die Untermenüs
+}
+
+/// Menüauswahl für Einstellungen; liefert true, wenn behandelt.
+fn handle_setting(id: usize) -> bool {
+    use crate::config::update;
+    match id {
+        ID_AUDIO => {
+            update(|c| c.audio_enabled = !c.audio_enabled);
+            crate::util::mark_settings_dirty(); // Lautstärketasten hängen davon ab
+            crate::util::request_reconnect();
+        }
+        ID_Q_LOW | ID_Q_STD | ID_Q_HIGH => {
+            let v = match id {
+                ID_Q_LOW => 10,
+                ID_Q_HIGH => 40,
+                _ => 0,
+            };
+            update(|c| c.bitrate_mbps = v);
+            crate::util::request_reconnect();
+        }
+        i if (ID_B_BASE..ID_B_BASE + BRIGHTNESS.len()).contains(&i) => {
+            let b = BRIGHTNESS[i - ID_B_BASE];
+            update(|c| c.tablet_brightness = b);
+            crate::util::mark_settings_dirty();
+        }
+        ID_INPUT => {
+            update(|c| c.tablet_input = !c.tablet_input);
+            crate::util::mark_settings_dirty();
+        }
+        ID_STATS => {
+            update(|c| c.show_stats = !c.show_stats);
+            crate::util::mark_settings_dirty();
+        }
+        ID_POWER => update(|c| c.follow_pc_power = !c.follow_pc_power),
+        ID_DND => {
+            update(|c| c.tablet_dnd = !c.tablet_dnd);
+            crate::util::mark_settings_dirty();
+        }
+        ID_VOLKEYS => {
+            update(|c| c.tablet_volume_keys = !c.tablet_volume_keys);
+            crate::util::mark_settings_dirty();
+        }
+        ID_WEBCAM => {
+            let on = !crate::config::current().webcam;
+            update(|c| c.webcam = on);
+            crate::camera::set_enabled(on, on);
+            if !on {
+                crate::util::notify(
+                    "camon",
+                    tr("Webcam ausgeschaltet", "Webcam turned off"),
+                    tr(
+                        "Die USBCD-Kamera ist aus Windows entfernt.",
+                        "The USBCD camera has been removed from Windows.",
+                    ),
+                    std::time::Duration::ZERO,
+                );
+            }
+        }
+        ID_PAUSE => crate::util::set_paused(!crate::util::paused()),
+        i if i >= ID_DEV_BASE => {
+            let entry = MENU_DEVICES
+                .lock()
+                .ok()
+                .and_then(|g| g.get(i - ID_DEV_BASE).cloned());
+            if let Some((serial, name, use_it)) = entry {
+                set_device(&serial, &name, use_it);
+            }
+        }
+        ID_AUTOSTART => {
+            std::thread::spawn(|| {
+                if crate::autostart::enabled() {
+                    crate::autostart::disable();
+                    set_autostart_known(false);
+                    crate::util::notify(
+                        "autostart",
+                        tr("Autostart ausgeschaltet", "Autostart turned off"),
+                        tr(
+                            "USBCD startet nicht mehr automatisch beim Anmelden.",
+                            "USBCD no longer starts automatically at sign-in.",
+                        ),
+                        std::time::Duration::ZERO,
+                    );
+                } else {
+                    match crate::autostart::enable() {
+                        Ok(()) => {
+                            set_autostart_known(true);
+                            crate::util::notify(
+                                "autostart",
+                                tr("Autostart eingeschaltet", "Autostart turned on"),
+                                tr(
+                                    "USBCD startet beim Anmelden automatisch.",
+                                    "USBCD now starts automatically at sign-in.",
+                                ),
+                                std::time::Duration::ZERO,
+                            );
+                        }
+                        Err(e) => crate::util::notify(
+                            "autostart",
+                            tr("Autostart nicht möglich", "Autostart not possible"),
+                            &format!("{e}"),
+                            std::time::Duration::ZERO,
+                        ),
+                    }
+                }
+            });
+        }
+        _ => return false,
+    }
+    true
+}
+
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if msg != 0 && msg == TASKBAR_CREATED.load(Ordering::Relaxed) {
+        add_icon(hwnd); // Explorer wurde neu gestartet
+        return 0;
+    }
+    match msg {
+        WM_TRAY => {
+            let ev = (lp as u32) & 0xFFFF;
+            if ev == WM_LBUTTONUP || ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU {
+                show_menu(hwnd);
+            }
+            0
+        }
+        WM_COMMAND => {
+            if handle_setting(wp & 0xFFFF) {
+                return 0;
+            }
+            match wp & 0xFFFF {
+                ID_LAUNCH => crate::util::request_launch(),
+                ID_SOUND => open("ms-settings:sound"),
+                ID_DISPLAY => open("ms-settings:display"),
+                ID_FOLDER => open(&crate::config::data_dir().to_string_lossy()),
+                ID_QUIT => {
+                    set_shutdown();
+                    DestroyWindow(hwnd);
+                }
+                _ => {}
+            }
+            0
+        }
+        WM_COPYDATA => {
+            // Klick in einer USBCD-Benachrichtigung (über das zweite USBCD.exe --uri …)
+            let cds = &*(lp as *const COPYDATASTRUCT);
+            if cds.dwData == COPYDATA_URI && cds.cbData & 1 == 0 && cds.cbData <= 2048 {
+                let w =
+                    std::slice::from_raw_parts(cds.lpData as *const u16, cds.cbData as usize / 2);
+                let uri = String::from_utf16_lossy(w);
+                std::thread::spawn(move || handle_uri(&uri));
+                return 1;
+            }
+            0
+        }
+        WM_POWERBROADCAST => {
+            // PC-Bildschirm an/aus (Windows meldet das auch direkt nach der Anmeldung)
+            const PBT_POWERSETTINGCHANGE: usize = 0x8013;
+            if wp == PBT_POWERSETTINGCHANGE && lp != 0 {
+                use windows_sys::Win32::System::Power::POWERBROADCAST_SETTING;
+                let s = &*(lp as *const POWERBROADCAST_SETTING);
+                let g = s.PowerSetting;
+                let want = windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
+                if g.data1 == want.data1
+                    && g.data2 == want.data2
+                    && g.data3 == want.data3
+                    && g.data4 == want.data4
+                    && s.DataLength >= 4
+                {
+                    // 0 = aus, 1 = an, 2 = gedimmt (gedimmt zählt als an)
+                    let state = std::ptr::read_unaligned(s.Data.as_ptr() as *const u32);
+                    DISPLAY_OFF.store(state == 0, Ordering::Relaxed);
+                    update_dark();
+                }
+            }
+            1
+        }
+        WM_QUERYENDSESSION => 1,
+        WM_ENDSESSION => {
+            // Herunterfahren/Neustart/Abmelden: Tablet nicht mit dem letzten Bild stehen lassen
+            if wp != 0 {
+                crate::session::system_ending();
+            }
+            0
+        }
+        WM_WTSSESSION_CHANGE => {
+            const WTS_SESSION_LOCK: usize = 7;
+            const WTS_SESSION_UNLOCK: usize = 8;
+            match wp {
+                WTS_SESSION_LOCK => LOCKED.store(true, Ordering::Relaxed),
+                WTS_SESSION_UNLOCK => LOCKED.store(false, Ordering::Relaxed),
+                _ => {}
+            }
+            update_dark();
+            0
+        }
+        WM_TIMER => {
+            update_tip(hwnd);
+            0
+        }
+        WM_NOTE => {
+            let next = PENDING.lock().ok().and_then(|mut g| {
+                if g.is_empty() {
+                    None
+                } else {
+                    Some(g.remove(0))
+                }
+            });
+            if let Some((t, x)) = next {
+                balloon(hwnd, &t, &x);
+            }
+            0
+        }
+        WM_SHOW_INFO => {
+            crate::notify::show(crate::notify::Toast {
+                title: tr("USBCD läuft", "USBCD is running").to_string(),
+                text: format!(
+                    "{}\n{}",
+                    status(),
+                    tr(
+                        "Menü: Klick auf das USBCD-Symbol in der Taskleiste.",
+                        "Menu: click the USBCD icon in the taskbar."
+                    )
+                ),
+                silent: true,
+                ..Default::default()
+            });
+            0
+        }
+        WM_DESTROY => {
+            let n = nid(hwnd);
+            Shell_NotifyIconW(NIM_DELETE, &n);
+            PostQuitMessage(0);
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+/// Gerät zulassen bzw. auf „nie verwenden“ stellen (Menü oder Benachrichtigung).
+fn set_device(serial: &str, name: &str, use_it: bool) {
+    let name = if name.is_empty() { serial } else { name };
+    crate::config::update(|c| {
+        let n = c
+            .devices
+            .get(serial)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| name.to_string());
+        let decoder_prompt = c.devices.get(serial).and_then(|d| d.decoder_prompt);
+        c.devices.insert(
+            serial.to_string(),
+            crate::config::KnownDevice {
+                name: n,
+                use_as_display: use_it,
+                decoder_prompt,
+            },
+        );
+    });
+    crate::util::remove_pending(serial);
+    crate::util::reset_notify("device-choice");
+    if use_it {
+        crate::log!("Gerät {serial} ({name}) als Bildschirm zugelassen");
+    } else {
+        crate::log!("Gerät {serial} ({name}) auf „nie verwenden“ gestellt");
+        crate::util::request_end_session();
+        crate::util::notify(
+            "device-choice",
+            tr("Gerät wird nicht verwendet", "Device will not be used"),
+            &format!(
+                "{name}\n{}",
+                tr(
+                    "Änderbar jederzeit im USBCD-Menü unter „Geräte“.",
+                    "You can change this anytime in the USBCD menu under “Devices”."
+                )
+            ),
+            std::time::Duration::ZERO,
+        );
+    }
+}
+
+/// Aktion aus einem `usbcd:`-Link (nur mit gültigem Sitzungs-Kennwort).
+fn handle_uri(uri: &str) {
+    use crate::notify::{parse_uri, Action};
+    match parse_uri(uri, crate::notify::nonce()) {
+        None => crate::log!("Unbekannter oder veralteter USBCD-Link ignoriert"),
+        Some(Action::None) => {}
+        Some(Action::OpenLog) => open(&crate::config::data_dir().to_string_lossy()),
+        Some(Action::ExtendDisplays) => match crate::display::extend_all() {
+            Ok(()) => {
+                crate::log!("Anzeige auf „Erweitern“ umgestellt (Klick in der Meldung)");
+                crate::util::reset_notify("notextended");
+                crate::util::request_launch(); // sofort neu verbinden
+            }
+            Err(e) => crate::util::notify(
+                "failed",
+                crate::i18n::tr("USBCD: Erweitern fehlgeschlagen", "USBCD: extending failed"),
+                &format!(
+                    "{e:#}\n{}",
+                    crate::i18n::tr(
+                        "Bitte Windows-Taste + P drücken und „Erweitern“ wählen.",
+                        "Please press Windows key + P and choose “Extend”."
+                    )
+                ),
+                std::time::Duration::from_secs(30),
+            ),
+        },
+        Some(Action::UseDevice(s)) | Some(Action::NeverDevice(s))
+            if !crate::util::pending_devices().iter().any(|(p, _)| p == &s)
+                && !crate::config::current().devices.contains_key(&s) =>
+        {
+            crate::log!("USBCD-Link für unbekanntes Gerät {s} ignoriert");
+        }
+        Some(Action::UseDevice(s)) => {
+            let name = name_of(&s);
+            set_device(&s, &name, true);
+        }
+        Some(Action::NeverDevice(s)) => {
+            let name = name_of(&s);
+            set_device(&s, &name, false);
+        }
+    }
+}
+
+fn name_of(serial: &str) -> String {
+    crate::util::pending_devices()
+        .into_iter()
+        .find(|(s, _)| s == serial)
+        .map(|(_, n)| n)
+        .or_else(|| {
+            crate::config::current()
+                .devices
+                .get(serial)
+                .map(|d| d.name.clone())
+        })
+        .unwrap_or_default()
+}
+
+/// Zweite USBCD-Instanz (aus einer Benachrichtigung gestartet): Link an die laufende geben.
+pub fn send_uri(uri: &str) {
+    if uri.len() > 1000 {
+        return;
+    }
+    let class = wide(CLASS);
+    let w: Vec<u16> = uri.encode_utf16().collect();
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        if h.is_null() {
+            return; // USBCD läuft nicht mehr – alte Benachrichtigung
+        }
+        let cds = COPYDATASTRUCT {
+            dwData: COPYDATA_URI,
+            cbData: (w.len() * 2) as u32,
+            lpData: w.as_ptr() as *mut _,
+        };
+        let mut res = 0usize;
+        SendMessageTimeoutW(
+            h,
+            WM_COPYDATA,
+            0,
+            &cds as *const _ as LPARAM,
+            SMTO_ABORTIFHUNG,
+            3000,
+            &mut res,
+        );
+    }
+}
+
+/// Bittet eine bereits laufende USBCD-Instanz, ihre Info-Blase zu zeigen.
+pub fn show_existing() -> bool {
+    let class = wide(CLASS);
+    unsafe {
+        let h = FindWindowW(class.as_ptr(), null());
+        if h.is_null() {
+            return false;
+        }
+        PostMessageW(h, WM_SHOW_INFO, 0, 0) != 0
+    }
+}
+
+const CLASS: &str = "USBCD_Tray";
+
+/// Zeigt in der laufenden Instanz eine Info-Blase (thread-sicher).
+pub fn post_show() {
+    let h = HWND_G.load(Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            PostMessageW(h as HWND, WM_SHOW_INFO, 0, 0);
+        }
+    }
+}
+
+/// Blockiert, bis „Beenden“ gewählt wird.
+pub fn run(show_on_start: bool) {
+    unsafe {
+        let hinst = GetModuleHandleW(null());
+        let class = wide(CLASS);
+        let mut wc: WNDCLASSW = zeroed();
+        wc.lpfnWndProc = Some(wndproc);
+        wc.hInstance = hinst;
+        wc.lpszClassName = class.as_ptr();
+        RegisterClassW(&wc);
+
+        let ico_path = wide(&crate::config::exe_dir().join("USBCD.ico").to_string_lossy());
+        let mut icon = LoadImageW(
+            null_mut(),
+            ico_path.as_ptr(),
+            IMAGE_ICON,
+            0,
+            0,
+            LR_LOADFROMFILE | LR_DEFAULTSIZE,
+        );
+        if icon.is_null() {
+            icon = LoadIconW(null_mut(), IDI_APPLICATION);
+        }
+        ICON.store(icon as usize, Ordering::Relaxed);
+        let big = LoadImageW(
+            null_mut(),
+            ico_path.as_ptr(),
+            IMAGE_ICON,
+            64,
+            64,
+            LR_LOADFROMFILE,
+        );
+        BIG_ICON.store(big as usize, Ordering::Relaxed);
+
+        let title = wide("USBCD");
+        let hwnd = CreateWindowExW(
+            0,
+            class.as_ptr(),
+            title.as_ptr(),
+            WS_OVERLAPPED,
+            0,
+            0,
+            0,
+            0,
+            null_mut(),
+            null_mut(),
+            hinst,
+            null(),
+        );
+        if hwnd.is_null() {
+            crate::log!("Taskleisten-Symbol: Fenster konnte nicht erstellt werden");
+            return;
+        }
+        HWND_G.store(hwnd as usize, Ordering::Relaxed);
+
+        // Explorer meldet einen Neustart der Taskleiste mit dieser Nachricht. USBCD läuft
+        // ohne Administratorrechte, daher sind keine Nachrichtenfilter-Ausnahmen nötig.
+        let tb = wide("TaskbarCreated");
+        TASKBAR_CREATED.store(RegisterWindowMessageW(tb.as_ptr()), Ordering::Relaxed);
+
+        add_icon(hwnd);
+        SetTimer(hwnd, TIMER_ID, 1000, None);
+        // Bildschirm aus/an und Sperren/Entsperren melden lassen
+        windows_sys::Win32::System::Power::RegisterPowerSettingNotification(
+            hwnd as _,
+            &windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+            0, // DEVICE_NOTIFY_WINDOW_HANDLE
+        );
+        windows_sys::Win32::System::RemoteDesktop::WTSRegisterSessionNotification(hwnd, 0);
+        if show_on_start {
+            post_show();
+        }
+        // Meldungen, die vor dem Erscheinen des Symbols anfielen
+        let n = PENDING.lock().map(|g| g.len()).unwrap_or(0);
+        for _ in 0..n {
+            PostMessageW(hwnd, WM_NOTE, 0, 0);
+        }
+
+        let mut msg: MSG = zeroed();
+        while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        HWND_G.store(0, Ordering::Relaxed);
+    }
+}

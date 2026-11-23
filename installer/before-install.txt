@@ -1,0 +1,44 @@
+﻿USBCD turns your Android tablet into a second monitor via USB-C – with sound through the tablet speakers.
+
+WHAT HAPPENS NEXT
+
+1. Windows asks up to twice "Would you like to install this device software?"
+   Please click "Install" each time:
+   • "Virtual Display Driver" – the monitor that the tablet picture comes from
+   • "VB-Audio" – the speaker "USBCD Tablet Speakers" (first installation only)
+
+2. After installing VB-CABLE for the first time, setup asks you to restart.
+
+3. USBCD then starts automatically at sign-in and appears as an icon
+   in the notification area of the taskbar (bottom right, possibly under "^").
+
+
+SET UP THE TABLET ONCE
+
+• Settings → About tablet → Software information → tap "Build number" 7 times
+• Settings → Developer options → turn on "USB debugging"
+• Connect the tablet and confirm "Allow USB debugging?" with "Always allow from this computer"
+
+The first time you connect the tablet, USBCD asks in a notification whether it should be
+used as a screen. Only after “Use as screen” is the USBCD app installed on it. Other
+Android devices (e.g. your phone) are left alone.
+
+
+GOOD TO KNOW
+
+• You choose sound through the tablet yourself: Sound settings → Output → "USBCD Tablet Speakers".
+• Other virtual monitors (e.g. Parsec) are not changed.
+• If Windows showed "Windows protected your PC" when starting setup:
+  this is only because this self-built setup has no publisher signature.
+
+
+SECURITY
+
+• USBCD runs without administrator rights. Only switching the tablet monitor on and off
+  and naming the speaker is done by the small "USBCD Helper" service, which accepts
+  nothing but these fixed commands.
+• PC and tablet app prove their identity to each other with a secret key on every
+  connection – other apps on the tablet can neither grab nor fake the picture.
+• USB debugging gives the connected PC far-reaching access to the tablet. Only choose
+  "Always allow" on your own PCs and remove other authorizations under
+  Developer options → "Revoke USB debugging authorizations".

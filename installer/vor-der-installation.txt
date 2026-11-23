@@ -1,0 +1,44 @@
+﻿USBCD macht dein Android-Tablet per USB-C zum zweiten Monitor – mit Ton über die Tablet-Lautsprecher.
+
+WAS GLEICH PASSIERT
+
+1. Windows fragt bis zu zweimal „Möchten Sie diese Gerätesoftware installieren?“
+   Bitte jeweils auf „Installieren“ klicken:
+   • „Virtual Display Driver“ – der Monitor, auf dem das Tablet-Bild entsteht
+   • „VB-Audio“ – der Lautsprecher „USBCD Tablet Lautsprecher“ (nur bei der ersten Installation)
+
+2. Nach der ersten Installation von VB-CABLE fragt das Setup nach einem Neustart.
+
+3. USBCD startet danach automatisch beim Anmelden und erscheint als Symbol
+   im Infobereich der Taskleiste (unten rechts, ggf. unter „^“).
+
+
+EINMAL AM TABLET EINRICHTEN
+
+• Einstellungen → Tabletinfo → Softwareinformationen → 7× auf „Buildnummer“ tippen
+• Einstellungen → Entwickleroptionen → „USB-Debugging“ einschalten
+• Tablet anstecken und „USB-Debugging zulassen?“ mit „Immer von diesem Computer zulassen“ bestätigen
+
+Beim ersten Anstecken fragt USBCD in einer Benachrichtigung, ob das Tablet als Bildschirm
+verwendet werden soll. Erst nach „Als Bildschirm verwenden“ wird die USBCD-App darauf
+installiert. Andere Android-Geräte (z. B. dein Handy) bleiben unberührt.
+
+
+GUT ZU WISSEN
+
+• Den Ton übers Tablet wählst du selbst: Soundeinstellungen → Ausgabe → „USBCD Tablet Lautsprecher“.
+• Andere virtuelle Monitore (z. B. Parsec) werden nicht verändert.
+• Hat Windows beim Start des Setups „Der Computer wurde durch Windows geschützt“ gezeigt:
+  Das liegt nur an der fehlenden Herausgeber-Signatur dieses selbst gebauten Setups.
+
+
+SICHERHEIT
+
+• USBCD läuft ohne Administratorrechte. Nur das Ein- und Ausschalten des Tablet-Monitors
+  und das Benennen des Lautsprechers übernimmt der kleine Dienst „USBCD Helper“, der
+  ausschließlich diese festen Befehle annimmt.
+• PC und Tablet-App weisen sich bei jeder Verbindung gegenseitig mit einem geheimen
+  Schlüssel aus – andere Apps auf dem Tablet können das Bild weder abgreifen noch fälschen.
+• USB-Debugging erlaubt dem verbundenen PC weitreichenden Zugriff auf das Tablet.
+  Am besten nur an eigenen PCs „Immer zulassen“ wählen und fremde Freigaben unter
+  Entwickleroptionen → „USB-Debugging-Autorisierungen aufheben“ löschen.

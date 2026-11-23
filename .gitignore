@@ -1,0 +1,38 @@
+# ── Geheim: niemals hochladen ─────────────────────────────────────────────
+# Signaturschlüssel der Tablet-App und sein Passwort. Wer sie hat, kann
+# gefälschte App-Updates bauen. Sicherung außerhalb des Projekts aufbewahren.
+installer/keys/
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.pem
+*.key
+keystore-passwort.txt
+.env
+.env.*
+
+# ── Persönlich / nur auf diesem Rechner gültig ───────────────────────────
+# Enthalten Benutzername, Pfade und die Seriennummer des Tablets.
+local.properties
+.idea/
+*.iml
+.vscode/
+usbcd.toml
+*.log
+
+# ── Erzeugt beim Bauen: kommt in GitHub-Releases, nicht ins Repo ─────────
+host/target/
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+installer/Output/
+# Fremdprogramme (ffmpeg, adb, Monitor-Treiber) und die gebaute App.
+# build-installer.ps1 lädt sie selbst und prüft sie gegen deps.lock.json.
+installer/deps/
+
+# ── System ───────────────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+.DS_Store

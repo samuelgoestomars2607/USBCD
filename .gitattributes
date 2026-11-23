@@ -1,0 +1,20 @@
+# Zeilenenden: Windows-Skripte und Setup-Texte brauchen CRLF, Shell-Skripte LF.
+* text=auto
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.iss  text eol=crlf
+installer/*.txt text eol=crlf
+gradlew text eol=lf
+*.sh   text eol=lf
+
+# Binärdateien nie verändern
+*.png  binary
+*.ico  binary
+*.ttf  binary
+*.otf  binary
+*.jar  binary
+*.bgra binary
+*.exe  binary
+*.dll  binary
+*.apk  binary
