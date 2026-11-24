@@ -2,7 +2,7 @@
   <img src="installer/USBCD-logo.png" width="128" height="128" alt="USBCD logo">
 </p>
 
-# USBCD – Android tablet as a second monitor with speakers (USB-C, Windows 11)
+# USBCD – Android tablet as a second monitor with speakers and webcam (USB-C, Windows 11)
 
 *Deutsche Version: [README.de.md](README.de.md)*
 
