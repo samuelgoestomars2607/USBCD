@@ -170,7 +170,7 @@ key `%USERPROFILE%\.android` (shared with Android Studio) and the source folder 
 ## Building from source
 
 **Requires:**
-* [Rust](https://rustup.rs) (stable)
+* [Rust](https://rustup.rs) (stable) – including the "Visual Studio C++ Build Tools", which the Rust installer offers to install.
 * [Android Studio](https://developer.android.com/studio) – brings the Android SDK and Java 17. Open the `android` folder once and let it sync.
 * [Inno Setup](https://jrsoftware.org/isinfo.php) 6.6 or newer – if it is missing, the build script installs it via winget.
 
@@ -178,6 +178,8 @@ key `%USERPROFILE%\.android` (shared with Android Studio) and the source folder 
 1. In the `installer` folder, double-click **`Setup bauen.cmd`**. It builds the Windows program **and the tablet app**,
    downloads FFmpeg, adb and the monitor driver the first time, and creates
    **`installer\Output\USBCD-Setup-<version>.exe`**. On errors the window stays open (log: `installer\build.log`).
+   If you downloaded the project as a ZIP, Windows may ask once whether to run the script anyway – that is normal
+   for downloaded scripts.
 2. The first build creates your own signing key for the tablet app in `installer\keys\`. **Back it up and never
    upload it** (it is in `.gitignore`). Apps you build are therefore signed differently from the release builds;
    when you switch, USBCD replaces the app on the tablet.
@@ -186,7 +188,9 @@ The third-party programs (FFmpeg, adb, monitor driver) are not part of the repos
 fixed versions – FFmpeg and adb from the [build-deps-1](../../releases/tag/build-deps-1) release, the monitor driver from
 its own project –, checks their signatures and compares them with the checksums in `installer\deps.lock.json`.
 That way everyone builds with exactly the same files.
-You can also install the tablet app directly from Android Studio (open the `android` folder → ▶ Run).
+If Android Studio is missing or the `android` folder was never synced, the setup is still created, but **without the
+tablet app** – the script shows a warning. You can also install the tablet app directly from Android Studio
+(open the `android` folder → ▶ Run).
 
 ## Project structure
 

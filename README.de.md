@@ -211,7 +211,7 @@ Studio) und der Quellcode-Ordner samt `installer\keys\`.
 ## Selbst bauen
 
 **Benötigt:**
-* [Rust](https://rustup.rs) (stable)
+* [Rust](https://rustup.rs) (stable) – samt „Visual Studio C++ Build Tools“, deren Installation der Rust-Installer anbietet.
 * [Android Studio](https://developer.android.com/studio) – bringt Android-SDK und Java 17 mit. Den Ordner `android` einmal öffnen und synchronisieren.
 * [Inno Setup](https://jrsoftware.org/isinfo.php) 6.6 oder neuer – fehlt es, installiert das Build-Skript es per winget.
 
@@ -219,6 +219,8 @@ Studio) und der Quellcode-Ordner samt `installer\keys\`.
 1. Im Ordner `installer` auf **`Setup bauen.cmd`** doppelklicken. Das Skript baut das Windows-Programm **und die
    Tablet-App**, lädt beim ersten Mal FFmpeg, adb und den Monitor-Treiber und erzeugt
    **`installer\Output\USBCD-Setup-<version>.exe`**. Bei Fehlern bleibt das Fenster offen (Protokoll: `installer\build.log`).
+   Wurde das Projekt als ZIP heruntergeladen, fragt Windows eventuell einmal, ob das Skript trotzdem ausgeführt werden
+   soll – das ist bei heruntergeladenen Skripten normal.
 2. Beim ersten Bauen entsteht in `installer\keys\` ein eigener Signaturschlüssel für die Tablet-App. **Sichern und nie
    hochladen** (steht in `.gitignore`). Selbst gebaute Apps sind damit anders signiert als die aus den Releases; beim
    Wechsel ersetzt USBCD die App auf dem Tablet.
@@ -227,7 +229,9 @@ Die Fremdprogramme (FFmpeg, adb, Monitor-Treiber) liegen nicht im Repository. Da
 Versionen – FFmpeg und adb aus dem Release [build-deps-1](../../releases/tag/build-deps-1), den Monitor-Treiber aus
 seinem eigenen Projekt –, prüft ihre Signaturen und vergleicht sie mit den Prüfsummen in `installer\deps.lock.json`.
 So baut jeder mit exakt denselben Dateien.
-Die Tablet-App lässt sich auch direkt über Android Studio installieren (Ordner `android` öffnen → ▶ Run).
+Fehlt Android Studio oder wurde der Ordner `android` nie synchronisiert, entsteht das Setup trotzdem, aber **ohne
+Tablet-App** – das Skript warnt dann. Die Tablet-App lässt sich auch direkt über Android Studio installieren
+(Ordner `android` öffnen → ▶ Run).
 
 ## Aufbau
 
