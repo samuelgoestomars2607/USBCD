@@ -15,7 +15,7 @@ Windows display settings also offer smaller resolutions in the tablet's aspect r
 For larger text, scaling stays the sharper choice.
 
 <p align="center">
-  <img src="docs/usbcd-connect.gif" width="720" alt="Plugging in the tablet: Windows reports it as connected and a window is dragged onto the tablet screen">
+  <img src="docs/usbcd-connect.gif" width="100%" alt="Plugging in the tablet: Windows reports it as connected and a window is dragged onto the tablet screen">
 </p>
 
 Language: English or German – setup, Windows program and tablet app follow the respective system language.
@@ -87,7 +87,7 @@ To build the setup yourself, see [Building from source](#building-from-source).
 USBCD runs as an **icon in the notification area** (possibly under ^). Click it to open the menu:
 
 <p align="center">
-  <img src="docs/usbcd-tray.gif" width="720" alt="The USBCD tray menu: turning on the tablet selfie camera as a webcam">
+  <img src="docs/usbcd-tray.gif" width="100%" alt="The USBCD tray menu: turning on the tablet selfie camera as a webcam">
 </p>
 
 | Menu item | Effect |
@@ -160,7 +160,7 @@ notification offers **Update now** and **Skip this version**. The menu then show
 the notification was skipped.
 
 <p align="center">
-  <img src="docs/usbcd-update.gif" width="720" alt="Update notification, download, and the checks USBCD runs before the setup starts">
+  <img src="docs/usbcd-update.gif" width="100%" alt="Update notification, download, and the checks USBCD runs before the setup starts">
 </p>
 
 * Nothing is installed without your click. USBCD downloads the setup and its signature file, verifies the signature

@@ -15,7 +15,7 @@ In den Windows-Anzeigeeinstellungen stehen zusätzlich kleinere Auflösungen im 
 hochgerechnet – das entlastet schwächere PCs. Für größere Schrift bleibt die Skalierung die schärfere Wahl.
 
 <p align="center">
-  <img src="docs/usbcd-connect.gif" width="720" alt="Tablet anstecken: Windows meldet es als verbunden, ein Fenster wird auf den Tablet-Bildschirm gezogen">
+  <img src="docs/usbcd-connect.gif" width="100%" alt="Tablet anstecken: Windows meldet es als verbunden, ein Fenster wird auf den Tablet-Bildschirm gezogen">
 </p>
 
 Sprache: Deutsch oder Englisch – Setup, Windows-Programm und Tablet-App richten sich nach der jeweiligen Systemsprache.
@@ -99,7 +99,7 @@ Wer das Setup selbst bauen möchte: siehe [Selbst bauen](#selbst-bauen).
 USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick darauf öffnet das Menü:
 
 <p align="center">
-  <img src="docs/usbcd-tray.gif" width="720" alt="Das USBCD-Menü im Infobereich: Selfie-Kamera des Tablets als Webcam einschalten">
+  <img src="docs/usbcd-tray.gif" width="100%" alt="Das USBCD-Menü im Infobereich: Selfie-Kamera des Tablets als Webcam einschalten">
 </p>
 
 | Menüpunkt | Wirkung |
@@ -175,7 +175,7 @@ Wenn ja, erscheint eine Benachrichtigung mit **Jetzt aktualisieren** und **Diese
 steht dann **Update auf … installieren** – auch wenn die Benachrichtigung übersprungen wurde.
 
 <p align="center">
-  <img src="docs/usbcd-update.gif" width="720" alt="Update-Hinweis, Download und die Prüfungen, die USBCD vor dem Start des Setups macht">
+  <img src="docs/usbcd-update.gif" width="100%" alt="Update-Hinweis, Download und die Prüfungen, die USBCD vor dem Start des Setups macht">
 </p>
 
 * Installiert wird nur nach deinem Klick. USBCD lädt das Setup und seine Signaturdatei, prüft die Unterschrift und
