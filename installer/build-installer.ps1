@@ -204,8 +204,10 @@ if (-not (Test-Path $ks)) {
     $pw = [Convert]::ToBase64String($b) -replace '[+/=]', 'x'
     Set-Content -LiteralPath $pwFile -Value $pw -Encoding ASCII -NoNewline
     $ErrorActionPreference = 'Continue'
-    & $keytool -genkeypair -keystore $ks -storetype PKCS12 -alias usbcd -keyalg RSA -keysize 3072 `
-        -validity 10000 -dname 'CN=USBCD, O=Samuel E. Ramirez' -storepass $pw -keypass $pw 2>&1 | Out-Host
+    # keytool meldet auch Erfolg auf stderr; als Text ausgeben, damit PowerShell es nicht rot als Fehler zeigt.
+    # Der Schlüssel trägt keinen Personennamen – jeder, der selbst baut, bekommt seinen eigenen.
+    & $keytool -J-Duser.language=en -genkeypair -keystore $ks -storetype PKCS12 -alias usbcd -keyalg RSA -keysize 3072 `
+        -validity 10000 -dname 'CN=USBCD' -storepass $pw -keypass $pw 2>&1 | ForEach-Object { "   $_" } | Out-Host
     $ErrorActionPreference = 'Stop'
     if (-not (Test-Path $ks)) { throw 'keytool konnte den Schlüssel nicht anlegen (Android Studio installiert?)' }
     Write-Host '   angelegt: installer\keys\ – bitte sicher aufbewahren, nicht weitergeben'
