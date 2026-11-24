@@ -107,6 +107,14 @@ function Get-FirstUrl([string[]]$Urls, [string]$OutFile) {
 Step 'USBCD bauen (cargo build --release --locked)'
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'cargo nicht gefunden – Rust von rustup.rs installieren' }
 Push-Location (Join-Path $repo 'host')
+# Rust schreibt Quellpfade der Bibliotheken ins Programm (für Fehlermeldungen). Den eigenen
+# Benutzerordner durch "~" ersetzen, damit der Windows-Benutzername nicht in USBCD.exe landet.
+# CARGO_ENCODED_RUSTFLAGS (Trennzeichen 0x1F) verträgt auch Benutzerordner mit Leerzeichen.
+$flags = @()
+if ($env:RUSTFLAGS) { $flags += $env:RUSTFLAGS -split '\s+' | Where-Object { $_ } }
+$flags += "--remap-path-prefix=$env:USERPROFILE=~"
+if ($env:CARGO_HOME) { $flags += "--remap-path-prefix=$env:CARGO_HOME=~\.cargo" }
+$env:CARGO_ENCODED_RUSTFLAGS = $flags -join [char]0x1F
 # --locked: genau die geprüften Versionen aus Cargo.lock (keine stillen Updates)
 cargo build --release --locked
 $ok = $LASTEXITCODE -eq 0
