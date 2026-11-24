@@ -31,25 +31,15 @@ Sprache: Deutsch oder Englisch – Setup, Windows-Programm und Tablet-App richte
 Ein Android-Tablet kann sich am USB-C-Port technisch nicht als Monitor ausgeben: Der Port arbeitet nur als
 USB-*Gerät* (MTP, ADB …) und hat keinen Bildeingang. Deshalb gibt es zwei Teile:
 
-```
- Windows 11                                            Android-Tablet
-┌────────────────────────────────────────┐  USB-C  ┌────────────────────────────────┐
-│ USBCD (Rust, Symbol in der Taskleiste) │  (adb)  │ USBCD-App (Kotlin)             │
-│  • erkennt das Tablet, startet die App │◄───────►│  • wählt höchsten Display-Modus│
-│  • Virtual Display Driver = echter     │  Infos  │  • meldet Auflösung, Hz,       │
-│    Monitor mit Tablet-Auflösung/-Hz    │◄────────│    Decoder-Fähigkeiten         │
-│  • FFmpeg-Aufnahme + GPU-Encoder       │  Video  │  • Hardware-Decoder (HEVC/H.264)│
-│    (NVENC / AMF / QSV)                 │────────►│    mit niedriger Latenz        │
-│  • „USBCD Tablet Lautsprecher“         │  Ton    │  • Ton über Tablet-Lautsprecher│
-│    → WASAPI-Loopback → PCM             │────────►│    bzw. Kopfhörer am Tablet    │
-└────────────────────────────────────────┘         └────────────────────────────────┘
-```
+* **Windows (Rust, Symbol in der Taskleiste):** erkennt das Tablet, startet die App, legt einen echten virtuellen
+  Monitor an ([Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)) mit Auflösung und
+  Bildrate des Tablets, nimmt ihn mit FFmpeg auf und kodiert auf der Grafikkarte (NVENC / AMF / QSV). Ton, der über
+  „USBCD Tablet Lautsprecher“ (VB-CABLE) läuft, wird abgegriffen und unkomprimiert gesendet.
+* **Tablet-App (Kotlin):** wählt den höchsten Display-Modus, meldet Auflösung und Decoder-Fähigkeiten,
+  dekodiert in Hardware mit niedriger Latenz, spielt den Ton ab.
+* **Verbindung:** ADB über das USB-Kabel – kein WLAN nötig.
 
-* **Monitor:** [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (signiert, Open Source).
-  Für Windows ein normaler Monitor (Anordnung, Skalierung, Fenster verschieben …).
-* **Bild:** FFmpeg nimmt genau diesen Monitor auf und kodiert auf der Grafikkarte; die App dekodiert in Hardware.
-* **Ton:** Der Standard-Ausgang wird **nicht** umgestellt. Für Ton übers Tablet in Windows „USBCD Tablet Lautsprecher“ wählen.
-* **Verbindung:** über ADB auf dem USB-Kabel – kein WLAN nötig.
+Der Standard-Ausgang für Ton wird **nicht** umgestellt. Für Ton übers Tablet in Windows „USBCD Tablet Lautsprecher“ wählen.
 
 ## Sicherheit
 
@@ -197,11 +187,11 @@ steht dann **Update auf … installieren** – auch wenn die Benachrichtigung ü
 | `max_fps` | `0` | 0 = Tablet-Maximum |
 | `tablet_brightness` | `100` | Helligkeit des Tablets in % |
 | `audio_enabled` | `true` | Ton übertragen |
-| `audio_device_rename` | `"USBCD Tablet Lautsprecher"` | Name des Lautsprechers in Windows |
+| `audio_device_rename` | `"USBCD Tablet Lautsprecher"` | Name des Lautsprechers in Windows (englisches Windows: „USBCD Tablet Speakers“) |
 | `auto_switch_audio` | `false` | Tablet-Lautsprecher beim Anstecken automatisch zum Standard machen |
 | `volume_mode` | `"auto"` | `manual` / `off`, falls die Windows-Lautstärke doppelt bzw. gar nicht wirkt |
 | `hide_cable_output` | `true` | Aufnahmeseite „CABLE Output“ ausblenden (Programme können den Tablet-Ton dann nicht als Mikrofon aufnehmen) |
-| `display_position` | – | Wird automatisch gemerkt, wenn du den Tablet-Monitor in den Windows-Anzeigeeinstellungen verschiebst; Zeile löschen = wieder „rechts daneben“ |
+| `display_position` | – | Wird automatisch gemerkt, wenn du den Tablet-Monitor in den Windows-Anzeigeeinstellungen verschiebst; Zeile löschen = wieder „rechts neben dem Hauptbildschirm“ |
 | `tablet_input` | `true` | Touch und S Pen steuern Windows (auch im Menü) |
 | `show_stats` | `false` | Info-Anzeige auf dem Tablet (auch im Menü) |
 | `follow_pc_power` | `true` | Tablet-Display mit dem PC-Bildschirm aus/an (auch im Menü) |
@@ -221,7 +211,7 @@ wichtigen Angaben in `diagnose.txt`. Dienst und Setup protokollieren nach `C:\Pr
 * **„Sicherheitswarnung: Eine andere App … gibt sich als USBCD aus“:** Unbekannte Apps auf dem Tablet prüfen und
   das Tablet neu starten. Das Tablet zeigt in diesem Fall „Verbindung blockiert“.
 
-* **Bild kommt nicht / bricht ab:** Menü → *Bildqualität → Sparsam* testen; sonst `encoder = "software"`.
+* **Bild kommt nicht / bricht ab:** Menü → *Bildqualität → Sparsam* testen; sonst `encoder = "software"` in `usbcd.toml`.
 * **Monitor erscheint nicht:** Im Geräte-Manager unter *Grafikkarten* muss „Virtual Display Driver“ stehen
   (ohne Tablet absichtlich deaktiviert).
 * **Kein Ton:** Ist in Windows „USBCD Tablet Lautsprecher“ gewählt und *Ton zum Tablet übertragen* an?
