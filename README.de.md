@@ -67,6 +67,10 @@ USB-*Gerät* (MTP, ADB …) und hat keinen Bildeingang. Deshalb gibt es zwei Tei
   und nicht weitergeben**). Eine anders signierte Fassung (z. B. aus Android Studio) ersetzt USBCD beim Anstecken.
 * **Code-Signatur (optional):** Mit `USBCD_SIGN_CERT_THUMBPRINT` (Fingerabdruck eines Code-Signing-Zertifikats im
   Zertifikatspeicher) signiert der Build `USBCD.exe`, Setup und Deinstallation.
+* **Updates nur vom Herausgeber:** USBCD installiert ein Update nur, wenn das Setup mit dem Update-Schlüssel des
+  Projektinhabers unterschrieben ist (ECDSA P-256, geprüft von Windows selbst). Der öffentliche Teil ist in
+  `USBCD.exe` eingebaut (`host/assets/update-key.pub`), der private liegt nur beim Herausgeber. Ein gefälschtes oder
+  verändertes Setup – auch eins, das im GitHub-Projekt auftaucht – wird gelöscht statt gestartet.
 * **USB-Debugging** gibt dem verbundenen PC weitreichenden Zugriff auf das Tablet. Nur an eigenen PCs
   „Immer zulassen“ wählen; fremde Freigaben unter *Entwickleroptionen → USB-Debugging-Autorisierungen aufheben*
   löschen.
@@ -108,6 +112,8 @@ USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick 
 | Soundeinstellungen / Anzeigeeinstellungen | öffnet die Windows-Einstellungen |
 | Einstellungen und Log öffnen | Ordner mit `usbcd.toml` und `usbcd.log` |
 | Beim Anmelden automatisch starten | Autostart ein/aus |
+| Update auf … installieren | erscheint, sobald es eine neue Version gibt – siehe [Updates](#updates) |
+| Automatisch nach Updates suchen | sieht kurz nach dem Start und danach täglich bei GitHub nach (Standard: an) |
 | USBCD beenden | |
 
 **Verhalten:**
@@ -154,6 +160,19 @@ Entsperren des PCs von selbst wieder. Bild und Ton laufen in der Zeit weiter; de
 deine Fenster bleiben also, wo sie sind. Ist am Tablet eine Displaysperre eingerichtet, erscheint USBCD trotzdem
 direkt über dem Sperrbildschirm.
 
+## Updates
+
+USBCD sieht kurz nach dem Start und danach einmal täglich im GitHub-Projekt nach, ob es eine neue Version gibt.
+Wenn ja, erscheint eine Benachrichtigung mit **Jetzt aktualisieren** und **Diese Version überspringen**. Im Menü
+steht dann **Update auf … installieren** – auch wenn die Benachrichtigung übersprungen wurde.
+
+* Installiert wird nur nach deinem Klick. USBCD lädt das Setup und seine Signaturdatei, prüft die Unterschrift und
+  startet erst dann das Setup; Windows fragt wie bei jeder Installation nach Administratorrechten. Programm und
+  Tablet-App werden aktualisiert, deine Einstellungen bleiben.
+* Gesendet wird nichts außer der Anfrage selbst – GitHub sieht wie bei jedem Webseitenaufruf deine IP-Adresse.
+  Ausschalten: Menü → *Automatisch nach Updates suchen*.
+* Vorabversionen (z. B. `build-deps-…` mit den Dateien zum Bauen) werden nie angeboten.
+
 ## Weitere Einstellungen
 
 `%LOCALAPPDATA%\USBCD\usbcd.toml` (Menü → *Einstellungen und Log öffnen*). Die wichtigsten Werte stellt das Menü ein.
@@ -178,6 +197,8 @@ direkt über dem Sperrbildschirm.
 | `tablet_dnd` | `false` | „Nicht stören“ auf dem Tablet, solange es Monitor ist (auch im Menü) |
 | `tablet_volume_keys` | `true` | Lautstärketasten des Tablets regeln den Tablet-Lautsprecher (auch im Menü) |
 | `sparse_frames` | `true` | Bilder nur bei Änderungen senden – nur bei Tablets, deren Dekoder jedes Bild sofort ausgibt (prüft die App selbst); spart Grafikkarte, USB und Tablet-Akku |
+| `update_check` | `true` | Kurz nach dem Start und täglich nach einer neuen Version sehen (auch im Menü) |
+| `update_skip` | `""` | Diese Version nicht mehr per Benachrichtigung anbieten (wird von „Diese Version überspringen“ gesetzt) |
 
 ## Fehlersuche
 
@@ -224,6 +245,11 @@ Studio) und der Quellcode-Ordner samt `installer\keys\`.
 2. Beim ersten Bauen entsteht in `installer\keys\` ein eigener Signaturschlüssel für die Tablet-App. **Sichern und nie
    hochladen** (steht in `.gitignore`). Selbst gebaute Apps sind damit anders signiert als die aus den Releases; beim
    Wechsel ersetzt USBCD die App auf dem Tablet.
+3. **Updates signieren kann nur der Projektinhaber.** Ohne seinen Update-Schlüssel entsteht ein Setup ohne
+   Signaturdatei – es lässt sich normal installieren, wird aber nie als Update angeboten. Wer eine eigene Fassung mit
+   eigenen Updates verteilen möchte, schreibt `none` in `host\assets\update-key.pub`; der nächste Build legt dann
+   einen eigenen Update-Schlüssel an (Sicherung: `installer\keys\update-signing-backup.txt` – in einen
+   Passwortmanager übernehmen und die Datei löschen). Zu jedem Release gehören dann Setup **und** `.sig`-Datei.
 
 Die Fremdprogramme (FFmpeg, adb, Monitor-Treiber) liegen nicht im Repository. Das Build-Skript lädt sie in festen
 Versionen – FFmpeg und adb aus dem Release [build-deps-1](../../releases/tag/build-deps-1), den Monitor-Treiber aus

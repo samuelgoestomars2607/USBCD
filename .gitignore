@@ -9,6 +9,8 @@ installer/keys/
 *.pem
 *.key
 keystore-passwort.txt
+# Update-Schlüssel (privat) und seine Sicherung – gehören in 1Password, nie ins Repo
+update-signing*
 .env
 .env.*
 

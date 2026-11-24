@@ -189,6 +189,7 @@ pub fn notify_with(
     let problem = matches!(
         key,
         "failed" | "installfail" | "ffmpeg" | "helper" | "security" | "camera" | "notextended"
+            | "updatefail"
     );
     if problem {
         actions.push((

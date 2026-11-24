@@ -17,6 +17,7 @@ mod notify;
 mod proto;
 mod session;
 mod tray;
+mod update;
 mod util;
 mod vdd;
 mod video;
@@ -95,6 +96,10 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        // Selbsttest des Build-Skripts: prüft Setup und Signatur wie beim Update (0 = gültig)
+        Some("--verify-update") if args.len() >= 3 => {
+            std::process::exit(update::verify_cli(&args[1], &args[2]));
         }
         Some("--remove-device") if args.len() >= 2 => {
             admin_log("setup.log");
@@ -177,6 +182,8 @@ fn main() {
     log!("USBCD {} gestartet", env!("CARGO_PKG_VERSION"));
     notify::init();
     camera::init();
+    update::cleanup();
+    update::start(args.iter().any(|a| a == "--update-test"));
     util::set_status(tr("Wird vorbereitet …", "Getting ready …"));
 
     // Vorbereitung und Tablet-Erkennung im Hintergrund – das Symbol erscheint sofort

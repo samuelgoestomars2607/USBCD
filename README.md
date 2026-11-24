@@ -56,6 +56,10 @@ The default sound output is **not** changed. For sound on the tablet, choose "US
   keep it private**). A differently signed copy (e.g. from Android Studio) is replaced by USBCD when connecting.
 * **Code signing (optional):** with `USBCD_SIGN_CERT_THUMBPRINT` (thumbprint of a code-signing certificate in the
   certificate store) the build signs `USBCD.exe`, the setup and the uninstaller.
+* **Updates only from the publisher:** USBCD installs an update only if the setup is signed with the project owner's
+  update key (ECDSA P-256, verified by Windows itself). The public part is built into `USBCD.exe`
+  (`host/assets/update-key.pub`); the private part stays with the publisher. A forged or modified setup – even one
+  that shows up in the GitHub project – is deleted instead of run.
 * **USB debugging** gives the connected PC far-reaching access to the tablet. Choose "Always allow" only on your own
   PCs and remove other authorizations under *Developer options → Revoke USB debugging authorizations*.
 
@@ -96,6 +100,8 @@ USBCD runs as an **icon in the notification area** (possibly under ^). Click it 
 | Sound settings / Display settings | opens the Windows settings |
 | Open settings and log | folder with `usbcd.toml` and `usbcd.log` |
 | Start automatically at sign-in | autostart on/off |
+| Install update … | appears as soon as a new version is out – see [Updates](#updates) |
+| Check for updates automatically | checks GitHub shortly after start and then daily (default: on) |
 | Quit USBCD | |
 
 **Behaviour:**
@@ -138,6 +144,46 @@ only ever uses the front camera, never the rear camera.
 **Tablet display with the PC:** the display really turns off (not just dark) and comes back by itself when the PC
 wakes up or is unlocked. Picture and sound keep running meanwhile; the tablet monitor stays in Windows, so your
 windows stay where they are. If the tablet has a screen lock, USBCD still appears directly above the lock screen.
+
+## Updates
+
+Shortly after starting and then once a day, USBCD checks the GitHub project for a new version. If there is one, a
+notification offers **Update now** and **Skip this version**. The menu then shows **Install update …** – even if
+the notification was skipped.
+
+* Nothing is installed without your click. USBCD downloads the setup and its signature file, verifies the signature
+  and only then starts the setup; Windows asks for administrator rights as with any installation. The program and
+  the tablet app are updated, your settings stay.
+* Nothing is sent except the request itself – like any website, GitHub sees your IP address.
+  To turn it off: menu → *Check for updates automatically*.
+* Pre-releases (e.g. `build-deps-…` with the files needed for building) are never offered.
+
+## More settings
+
+`%LOCALAPPDATA%\USBCD\usbcd.toml` (menu → *Open settings and log*). The menu sets the most important values.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `encoder` | `"auto"` | `nvenc` / `amf` / `qsv` / `software` |
+| `codec` | `"auto"` | `hevc` / `avc` |
+| `bitrate_mbps` | `0` | 0 = automatic (20–80 Mbit/s) |
+| `max_fps` | `0` | 0 = tablet maximum |
+| `tablet_brightness` | `100` | tablet brightness in % |
+| `audio_enabled` | `true` | send sound |
+| `audio_device_rename` | `"USBCD Tablet Lautsprecher"` | name of the speaker in Windows (English Windows: "USBCD Tablet Speakers") |
+| `auto_switch_audio` | `false` | make the tablet speakers the default output when connecting |
+| `volume_mode` | `"auto"` | `manual` / `off` if the Windows volume applies twice or not at all |
+| `hide_cable_output` | `true` | hide the recording side "CABLE Output" (programs then can't record the tablet sound as a microphone) |
+| `display_position` | – | remembered automatically when you move the tablet monitor in the Windows display settings; delete the line = back to "right of the main screen" |
+| `tablet_input` | `true` | touch and S Pen control Windows (also in the menu) |
+| `show_stats` | `false` | info overlay on the tablet (also in the menu) |
+| `follow_pc_power` | `true` | tablet display off/on together with the PC screen (also in the menu) |
+| `webcam` | `false` | tablet front camera as a webcam (also in the menu) |
+| `tablet_dnd` | `false` | "Do not disturb" on the tablet while it is a monitor (also in the menu) |
+| `tablet_volume_keys` | `true` | the tablet's volume keys control the tablet speakers (also in the menu) |
+| `sparse_frames` | `true` | send frames only when something changes – only for tablets whose decoder outputs every frame immediately (the app checks this itself); saves GPU, USB and tablet battery |
+| `update_check` | `true` | check for a new version shortly after start and daily (also in the menu) |
+| `update_skip` | `""` | don't offer this version by notification anymore (set by "Skip this version") |
 
 ## Troubleshooting
 
@@ -183,6 +229,11 @@ key `%USERPROFILE%\.android` (shared with Android Studio) and the source folder 
 2. The first build creates your own signing key for the tablet app in `installer\keys\`. **Back it up and never
    upload it** (it is in `.gitignore`). Apps you build are therefore signed differently from the release builds;
    when you switch, USBCD replaces the app on the tablet.
+3. **Only the project owner can sign updates.** Without the owner's update key the build creates a setup without a
+   signature file – it installs normally but is never offered as an update. If you want to distribute your own
+   version with your own updates, write `none` into `host\assets\update-key.pub`; the next build then creates your
+   own update key (backup: `installer\keys\update-signing-backup.txt` – move it into a password manager and delete
+   the file). Every release then needs the setup **and** its `.sig` file.
 
 The third-party programs (FFmpeg, adb, monitor driver) are not part of the repository. The build script downloads
 fixed versions – FFmpeg and adb from the [build-deps-1](../../releases/tag/build-deps-1) release, the monitor driver from

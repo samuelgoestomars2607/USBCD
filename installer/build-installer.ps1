@@ -13,6 +13,11 @@
 # Prüfsummen in deps.lock.json. Weicht eine Datei ab, bricht der Build ab
 # (bewusstes Update auf neue Versionen: URLs unten ändern und -UpdateDeps).
 #
+# Update-Signatur: Beim Projektinhaber unterschreibt der Build das Setup zusätzlich mit dem
+# Update-Schlüssel (installer\keys\update-signing.key). Daneben entsteht
+# USBCD-Setup-<version>.exe.sig – beide Dateien gehören ins GitHub-Release. Nur so signierte
+# Setups installiert USBCD als Update. Ohne Schlüssel (alle anderen) entsteht keine .sig.
+#
 # Optional: Code-Signatur von USBCD.exe und Setup mit einem eigenen Zertifikat:
 #   $env:USBCD_SIGN_CERT_THUMBPRINT = '<SHA1-Fingerabdruck im Zertifikatspeicher>'
 
@@ -101,6 +106,73 @@ function Get-FirstUrl([string[]]$Urls, [string]$OutFile) {
         }
     }
     throw "Download fehlgeschlagen: $($Urls -join ', ')"
+}
+
+# --- 0. Update-Schlüssel ---
+# Privater Teil: installer\keys\update-signing.key, mit Windows (DPAPI) für das eigene
+# Benutzerkonto verschlüsselt – auf einem anderen PC oder Konto nicht lesbar.
+# Öffentlicher Teil: host\assets\update-key.pub (wird in USBCD.exe eingebaut; „none“ =
+# noch kein Schlüssel – dann legt dieser Build einen an).
+Add-Type -AssemblyName System.Security
+$keys = Join-Path $here 'keys'
+$updKey = Join-Path $keys 'update-signing.key'
+$updBackup = Join-Path $keys 'update-signing-backup.txt'
+$pubFile = Join-Path $repo 'host\assets\update-key.pub'
+$pubText = (Get-Content -LiteralPath $pubFile -Raw).Trim()
+
+function ConvertTo-Hex([byte[]]$b) { -join ($b | ForEach-Object { $_.ToString('x2') }) }
+function ConvertFrom-Hex([string]$h) {
+    $h = $h.Trim()
+    if ($h -notmatch '^[0-9a-f]+$' -or ($h.Length % 2) -ne 0) { throw 'Ungültiger Hex-Text in der Schlüsselsicherung' }
+    [byte[]]$o = New-Object byte[] ($h.Length / 2)
+    for ($i = 0; $i -lt $o.Length; $i++) { $o[$i] = [Convert]::ToByte($h.Substring(2 * $i, 2), 16) }
+    , $o
+}
+function Save-UpdateKey([byte[]]$raw) {
+    New-Item -ItemType Directory -Force -Path $keys | Out-Null
+    # nur der eigene Benutzer darf den Ordner lesen
+    icacls $keys /inheritance:r /grant:r "$($env:USERDOMAIN)\$($env:USERNAME):(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+    $enc = [Security.Cryptography.ProtectedData]::Protect($raw, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [IO.File]::WriteAllBytes($updKey, $enc)
+}
+
+if (-not (Test-Path $updKey) -and (Test-Path $updBackup)) {
+    Step 'Update-Schlüssel aus der Sicherung übernehmen'
+    $raw = ConvertFrom-Hex (Get-Content -LiteralPath $updBackup -Raw)
+    if ($raw.Length -ne 96) { throw 'installer\keys\update-signing-backup.txt ist unvollständig' }
+    Save-UpdateKey $raw
+    Write-Warning '   übernommen – installer\keys\update-signing-backup.txt jetzt löschen (die Sicherung liegt in 1Password)'
+}
+if (-not (Test-Path $updKey) -and $pubText -eq 'none') {
+    Step 'Update-Schlüssel anlegen'
+    $cp = New-Object Security.Cryptography.CngKeyCreationParameters
+    $cp.ExportPolicy = [Security.Cryptography.CngExportPolicies]::AllowPlaintextExport
+    $k = [Security.Cryptography.CngKey]::Create([Security.Cryptography.CngAlgorithm]::ECDsaP256, $null, $cp)
+    $blob = $k.Export([Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)   # Kopf (8 Byte) + X + Y + d
+    $k.Dispose()
+    if ($blob.Length -ne 104) { throw 'Update-Schlüssel: unerwartetes Format' }
+    [byte[]]$raw = $blob[8..103]
+    Save-UpdateKey $raw
+    [IO.File]::WriteAllText($updBackup, (ConvertTo-Hex $raw))
+    $pubText = ConvertTo-Hex $raw[0..63]
+    [IO.File]::WriteAllText($pubFile, $pubText + "`n")
+    Write-Warning '   Update-Schlüssel angelegt. WICHTIG: Den Text aus installer\keys\update-signing-backup.txt in 1Password sichern und die Datei danach löschen.'
+    Write-Warning '   host\assets\update-key.pub enthält jetzt den öffentlichen Teil – diese Datei gehört ins Repository.'
+}
+$updRaw = $null
+if (Test-Path $updKey) {
+    try {
+        [byte[]]$updRaw = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($updKey), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    } catch {
+        throw 'installer\keys\update-signing.key lässt sich nicht entschlüsseln (anderer PC oder anderes Windows-Konto?). Datei löschen und die Sicherung aus 1Password als installer\keys\update-signing-backup.txt ablegen.'
+    }
+    if ($updRaw.Length -ne 96) { throw 'installer\keys\update-signing.key ist beschädigt' }
+    if ((ConvertTo-Hex $updRaw[0..63]) -ne $pubText) {
+        throw 'Der Update-Schlüssel in installer\keys passt nicht zu host\assets\update-key.pub – Build abgebrochen'
+    }
+    Write-Host '   Update-Schlüssel vorhanden – das Setup wird für Updates signiert'
+} else {
+    Write-Host '   kein Update-Schlüssel – das Setup wird nicht für Updates signiert (das kann nur der Projektinhaber)'
 }
 
 # --- 1. USBCD (Rust) ---
@@ -343,10 +415,45 @@ if ($rc -ne 0) { throw 'Inno Setup meldet Fehler' }
 $out = Join-Path $here "Output\USBCD-Setup-$version.exe"
 # ältere Setups aufräumen – nur das gerade gebaute bleibt liegen
 if (Test-Path -LiteralPath $out) {
-    Get-ChildItem -LiteralPath (Join-Path $here 'Output') -Filter 'USBCD-Setup-*.exe' |
+    Get-ChildItem -LiteralPath (Join-Path $here 'Output') -Filter 'USBCD-Setup-*' |
         Where-Object { $_.FullName -ne $out } |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 }
+# --- Update-Signatur (nur mit Update-Schlüssel) ---
+$sigOut = "$out.sig"
+Remove-Item -LiteralPath $sigOut -Force -ErrorAction SilentlyContinue
+if ($updRaw) {
+    Step 'Setup für Updates signieren'
+    $name = Split-Path $out -Leaf
+    $sha = (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLowerInvariant()
+    $msg = "usbcd-update 1`nversion $version`nfile $name`nsha256 $sha`n"
+    # BCRYPT_ECCPRIVATE_BLOB: „ECS2“, Schlüssellänge 32, dann X + Y + d
+    [byte[]]$priv = [byte[]](0x45, 0x43, 0x53, 0x32, 0x20, 0, 0, 0) + $updRaw
+    $k = [Security.Cryptography.CngKey]::Import($priv, [Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)
+    $ec = New-Object Security.Cryptography.ECDsaCng($k)
+    $ec.HashAlgorithm = [Security.Cryptography.CngAlgorithm]::Sha256
+    $sigHex = ConvertTo-Hex $ec.SignData([Text.Encoding]::ASCII.GetBytes($msg))
+    $ec.Dispose()
+    $k.Dispose()
+    [IO.File]::WriteAllText($sigOut, $msg + "signature $sigHex`n")
+
+    # Selbsttest mit dem gebauten USBCD.exe: echte Signatur annehmen, veränderte ablehnen
+    $exe = Join-Path $repo 'host\target\release\USBCD.exe'
+    $p = Start-Process -FilePath $exe -ArgumentList @('--verify-update', "`"$out`"", "`"$sigOut`"") -Wait -PassThru
+    if ($p.ExitCode -ne 0) { throw "Selbsttest: USBCD.exe lehnt die Update-Signatur ab (Code $($p.ExitCode))" }
+    $bad = Join-Path $tmp 'manipuliert.sig'
+    $flip = if ($sigHex[0] -eq '0') { '1' } else { '0' }
+    [IO.File]::WriteAllText($bad, $msg + "signature $flip$($sigHex.Substring(1))`n")
+    $p = Start-Process -FilePath $exe -ArgumentList @('--verify-update', "`"$out`"", "`"$bad`"") -Wait -PassThru
+    Remove-Item -LiteralPath $bad -Force -ErrorAction SilentlyContinue
+    if ($p.ExitCode -eq 0) {
+        Remove-Item -LiteralPath $sigOut -Force
+        throw 'Selbsttest: eine veränderte Signatur wurde angenommen – Build abgebrochen'
+    }
+    Write-Host "   signiert und geprüft: $sigOut"
+    Write-Host '   Fürs GitHub-Release beide Dateien hochladen: Setup und .sig'
+}
+
 Write-Host "`nFertig: $out" -ForegroundColor Green
 Stop-Transcript | Out-Null
 explorer.exe (Join-Path $here 'Output')

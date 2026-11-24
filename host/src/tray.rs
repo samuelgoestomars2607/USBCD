@@ -133,6 +133,8 @@ const ID_POWER: usize = 53;
 const ID_WEBCAM: usize = 54;
 const ID_DND: usize = 55;
 const ID_VOLKEYS: usize = 56;
+const ID_UPDATE: usize = 57;
+const ID_UPDCHECK: usize = 58;
 const ID_DEV_BASE: usize = 100; // 100.. → Geräte im Untermenü
 const ID_DEV_NONE: usize = 99;
 const COPYDATA_URI: usize = 0x5553_4244; // "USBD"
@@ -266,6 +268,15 @@ unsafe fn show_menu(hwnd: HWND) {
 
     let m = CreatePopupMenu();
     append(m, MF_STRING | MF_GRAYED, ID_STATUS, &status());
+    if let Some(r) = crate::update::available() {
+        // bleibt sichtbar, auch wenn die Benachrichtigung übersprungen wurde
+        append(
+            m,
+            MF_STRING,
+            ID_UPDATE,
+            &tr("Update auf {v} installieren …", "Install update {v} …").replace("{v}", &r.version),
+        );
+    }
     append(m, MF_SEPARATOR, 0, "");
     append(
         m,
@@ -395,6 +406,15 @@ unsafe fn show_menu(hwnd: HWND) {
             "Start automatically at sign-in",
         ),
     );
+    append(
+        m,
+        check(cfg.update_check),
+        ID_UPDCHECK,
+        tr(
+            "Automatisch nach Updates suchen",
+            "Check for updates automatically",
+        ),
+    );
     append(m, MF_SEPARATOR, 0, "");
     append(m, MF_STRING, ID_QUIT, tr("USBCD beenden", "Quit USBCD"));
 
@@ -451,6 +471,15 @@ fn handle_setting(id: usize) -> bool {
         ID_VOLKEYS => {
             update(|c| c.tablet_volume_keys = !c.tablet_volume_keys);
             crate::util::mark_settings_dirty();
+        }
+        ID_UPDCHECK => {
+            let on = !crate::config::current().update_check;
+            update(|c| c.update_check = on);
+            if on {
+                crate::update::check_now();
+            } else {
+                crate::update::clear();
+            }
         }
         ID_WEBCAM => {
             let on = !crate::config::current().webcam;
@@ -540,6 +569,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             match wp & 0xFFFF {
                 ID_LAUNCH => crate::util::request_launch(),
+                ID_UPDATE => {
+                    if let Some(r) = crate::update::available() {
+                        crate::update::install(&r.version);
+                    }
+                }
                 ID_SOUND => open("ms-settings:sound"),
                 ID_DISPLAY => open("ms-settings:display"),
                 ID_FOLDER => open(&crate::config::data_dir().to_string_lossy()),
@@ -728,6 +762,11 @@ fn handle_uri(uri: &str) {
             let name = name_of(&s);
             set_device(&s, &name, false);
         }
+        Some(Action::UpdateInstall(v)) => crate::update::install(&v),
+        Some(Action::UpdateSkip(v)) => {
+            crate::log!("Update {v}: wird nicht mehr per Benachrichtigung angeboten");
+            crate::config::update(|c| c.update_skip = v);
+        }
     }
 }
 
@@ -788,6 +827,16 @@ pub fn show_existing() -> bool {
 }
 
 const CLASS: &str = "USBCD_Tray";
+
+/// Beendet USBCD wie über „USBCD beenden“ (thread-sicher; z. B. vor einem Update).
+pub fn request_quit() {
+    let h = HWND_G.load(Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            PostMessageW(h as HWND, WM_COMMAND, ID_QUIT, 0);
+        }
+    }
+}
 
 /// Zeigt in der laufenden Instanz eine Info-Blase (thread-sicher).
 pub fn post_show() {

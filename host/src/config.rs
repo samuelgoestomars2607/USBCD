@@ -73,6 +73,12 @@ pub struct Config {
     /// USB und Tablet-Akku). Nur bei Tablets, deren Dekoder nachweislich jedes Bild sofort
     /// ausgibt – sonst wie bisher ein gleichmäßiger Bildstrom.
     pub sparse_frames: bool,
+    /// Täglich bei GitHub nach einer neuen USBCD-Version sehen (Menü „Automatisch nach
+    /// Updates suchen“). Installiert wird nur nach Klick und nur mit gültiger Signatur.
+    pub update_check: bool,
+    /// Diese Version nicht mehr per Benachrichtigung anbieten („Diese Version überspringen“);
+    /// im Menü bleibt das Update trotzdem wählbar.
+    pub update_skip: String,
     /// Bekannte Geräte (Seriennummer → Entscheidung). Unbekannte Geräte werden nie
     /// ungefragt verändert – USBCD fragt erst nach.
     pub devices: std::collections::BTreeMap<String, KnownDevice>,
@@ -137,6 +143,8 @@ impl Default for Config {
             tablet_dnd: false,
             tablet_volume_keys: true,
             sparse_frames: true,
+            update_check: true,
+            update_skip: String::new(),
             devices: Default::default(),
         }
     }

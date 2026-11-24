@@ -327,6 +327,10 @@ pub enum Action {
     ExtendDisplays,
     UseDevice(String),
     NeverDevice(String),
+    /// Update auf diese Version installieren
+    UpdateInstall(String),
+    /// diese Version nicht mehr per Benachrichtigung anbieten
+    UpdateSkip(String),
 }
 
 /// Erlaubte Zeichen einer adb-Seriennummer.
@@ -343,11 +347,13 @@ pub fn parse_uri(uri: &str, expected_nonce: &str) -> Option<Action> {
     let mut n = None;
     let mut act = None;
     let mut serial = None;
+    let mut version = None;
     for kv in query.split('&') {
         match kv.split_once('=') {
             Some(("n", v)) => n = Some(v),
             Some(("act", v)) => act = Some(v),
             Some(("serial", v)) => serial = Some(v),
+            Some(("v", v)) => version = Some(v),
             _ => {}
         }
     }
@@ -362,6 +368,15 @@ pub fn parse_uri(uri: &str, expected_nonce: &str) -> Option<Action> {
         ("device", Some("never"), Some(s)) if valid_serial(s) => {
             Some(Action::NeverDevice(s.into()))
         }
+        ("update", Some(a), _) => match (a, version) {
+            ("install", Some(v)) if crate::update::valid_version(v) => {
+                Some(Action::UpdateInstall(v.into()))
+            }
+            ("skip", Some(v)) if crate::update::valid_version(v) => {
+                Some(Action::UpdateSkip(v.into()))
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -412,6 +427,17 @@ mod tests {
         assert_eq!(parse_uri("usbcd:extend?n=abc", "abc"), Some(Action::ExtendDisplays));
         assert_eq!(parse_uri("usbcd:extend?n=x", "abc"), None);
         assert_eq!(parse_uri("http:x", "abc"), None);
+        assert_eq!(
+            parse_uri("usbcd:update?act=install&v=0.6.15&n=abc", "abc"),
+            Some(Action::UpdateInstall("0.6.15".into()))
+        );
+        assert_eq!(
+            parse_uri("usbcd:update?act=skip&v=0.6.15&n=abc", "abc"),
+            Some(Action::UpdateSkip("0.6.15".into()))
+        );
+        assert_eq!(parse_uri("usbcd:update?act=install&v=0.6.15&n=x", "abc"), None);
+        assert_eq!(parse_uri("usbcd:update?act=install&v=..%2f&n=abc", "abc"), None);
+        assert_eq!(parse_uri("usbcd:update?act=run&v=0.6.15&n=abc", "abc"), None);
         assert_eq!(parse_uri("usbcd:none?n=", ""), None);
     }
 
