@@ -14,6 +14,10 @@ Windows display settings also offer smaller resolutions in the tablet's aspect r
 1280 × 768, 1000 × 600). They are transmitted at that size and upscaled by the tablet – easier on weaker PCs.
 For larger text, scaling stays the sharper choice.
 
+<p align="center">
+  <img src="docs/usbcd-connect.gif" width="720" alt="Plugging in the tablet: Windows reports it as connected and a window is dragged onto the tablet screen">
+</p>
+
 Language: English or German – setup, Windows program and tablet app follow the respective system language.
 
 ## Requirements
@@ -81,6 +85,10 @@ To build the setup yourself, see [Building from source](#building-from-source).
 ## Usage
 
 USBCD runs as an **icon in the notification area** (possibly under ^). Click it to open the menu:
+
+<p align="center">
+  <img src="docs/usbcd-tray.gif" width="720" alt="The USBCD tray menu: turning on the tablet selfie camera as a webcam">
+</p>
 
 | Menu item | Effect |
 |---|---|
@@ -150,6 +158,10 @@ windows stay where they are. If the tablet has a screen lock, USBCD still appear
 Shortly after starting and then once a day, USBCD checks the GitHub project for a new version. If there is one, a
 notification offers **Update now** and **Skip this version**. The menu then shows **Install update …** – even if
 the notification was skipped.
+
+<p align="center">
+  <img src="docs/usbcd-update.gif" width="720" alt="Update notification, download, and the checks USBCD runs before the setup starts">
+</p>
 
 * Nothing is installed without your click. USBCD downloads the setup and its signature file, verifies the signature
   and only then starts the setup; Windows asks for administrator rights as with any installation. The program and
@@ -246,6 +258,7 @@ tablet app** – the script shows a warning. You can also install the tablet app
 ## Project structure
 
 ```
+docs/       Animations used in this README
 android/    Android Studio project (Kotlin, no third-party libraries)
             MainActivity (waiting screen, brightness), GradientBackground, Fonts,
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth

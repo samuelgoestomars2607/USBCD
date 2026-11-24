@@ -10,6 +10,7 @@ gradlew text eol=lf
 
 # Binärdateien nie verändern
 *.png  binary
+*.gif  binary
 *.ico  binary
 *.ttf  binary
 *.otf  binary

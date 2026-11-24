@@ -14,6 +14,10 @@ In den Windows-Anzeigeeinstellungen stehen zusätzlich kleinere Auflösungen im 
 (beim Tab S6 Lite 1600 × 960, 1280 × 768, 1000 × 600). Sie werden in dieser Größe übertragen und erst vom Tablet
 hochgerechnet – das entlastet schwächere PCs. Für größere Schrift bleibt die Skalierung die schärfere Wahl.
 
+<p align="center">
+  <img src="docs/usbcd-connect.gif" width="720" alt="Tablet anstecken: Windows meldet es als verbunden, ein Fenster wird auf den Tablet-Bildschirm gezogen">
+</p>
+
 Sprache: Deutsch oder Englisch – Setup, Windows-Programm und Tablet-App richten sich nach der jeweiligen Systemsprache.
 
 ## Voraussetzungen
@@ -94,6 +98,10 @@ Wer das Setup selbst bauen möchte: siehe [Selbst bauen](#selbst-bauen).
 
 USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick darauf öffnet das Menü:
 
+<p align="center">
+  <img src="docs/usbcd-tray.gif" width="720" alt="Das USBCD-Menü im Infobereich: Selfie-Kamera des Tablets als Webcam einschalten">
+</p>
+
 | Menüpunkt | Wirkung |
 |---|---|
 | Status | z. B. „Verbunden: Galaxy Tab S6 Lite · 2000×1200 · 60 Hz“ |
@@ -165,6 +173,10 @@ direkt über dem Sperrbildschirm.
 USBCD sieht kurz nach dem Start und danach einmal täglich im GitHub-Projekt nach, ob es eine neue Version gibt.
 Wenn ja, erscheint eine Benachrichtigung mit **Jetzt aktualisieren** und **Diese Version überspringen**. Im Menü
 steht dann **Update auf … installieren** – auch wenn die Benachrichtigung übersprungen wurde.
+
+<p align="center">
+  <img src="docs/usbcd-update.gif" width="720" alt="Update-Hinweis, Download und die Prüfungen, die USBCD vor dem Start des Setups macht">
+</p>
 
 * Installiert wird nur nach deinem Klick. USBCD lädt das Setup und seine Signaturdatei, prüft die Unterschrift und
   startet erst dann das Setup; Windows fragt wie bei jeder Installation nach Administratorrechten. Programm und
@@ -262,6 +274,7 @@ Tablet-App** – das Skript warnt dann. Die Tablet-App lässt sich auch direkt �
 ## Aufbau
 
 ```
+docs/       Animationen für diese README
 android/    Android-Studio-Projekt (Kotlin, keine Fremdbibliotheken)
             MainActivity (Wartebildschirm, Helligkeit), GradientBackground, Fonts,
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
