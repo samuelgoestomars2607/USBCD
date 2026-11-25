@@ -63,6 +63,11 @@ pub struct StreamParams {
     /// Dekoder-Prüfung beim ersten Verbinden: 5 Bilder/s, damit das Tablet eindeutig
     /// messen kann, ob es jedes Bild sofort ausgibt (unsichtbar hinter dem Verbindungsbildschirm)
     pub probe: bool,
+    /// Übertragungsgröße = Größe des Tablet-Monitors (nichts zu skalieren)
+    pub native: bool,
+    /// zusätzlich = Auflösung des Tablet-Displays: jedes Pixel landet 1:1 auf dem Panel
+    /// (Voraussetzung für verlustfreie Standbilder)
+    pub pixel_exact: bool,
 }
 
 /// Bildrate während der Dekoder-Prüfung (alle 200 ms ein Bild)
@@ -105,6 +110,20 @@ pub fn auto_bitrate(w: u32, h: u32, fps: u32, codec: Codec) -> u64 {
     b.clamp(20e6, 80e6) as u64
 }
 
+/// Obergrenze der Stufe „Maximal“ – über USB problemlos, für Tablet-Dekoder unkritisch.
+pub const MAX_BITRATE: u64 = 100_000_000;
+
+/// Datenrate nach Einstellung: „Maximal“, fester Wert aus dem Menü oder automatisch.
+pub fn bitrate_for(cfg: &Config, w: u32, h: u32, fps: u32, codec: Codec) -> u64 {
+    if cfg.quality_max {
+        MAX_BITRATE
+    } else if cfg.bitrate_mbps > 0 {
+        cfg.bitrate_mbps as u64 * 1_000_000
+    } else {
+        auto_bitrate(w, h, fps, codec)
+    }
+}
+
 pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
     let cursor = if cfg.capture_cursor { 1 } else { 0 };
     let src = if cfg.capture_method == "ddagrab" {
@@ -114,26 +133,50 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
         )
     } else {
         format!(
-            "gfxcapture=hmonitor={}:max_framerate={}:capture_cursor={cursor}{}:width={}:height={}:resize_mode=scale_aspect",
+            "gfxcapture=hmonitor={}:max_framerate={}:capture_cursor={cursor}{}:width={}:height={}:resize_mode=scale_aspect{}{}",
             p.hmonitor,
             if p.probe { PROBE_FPS } else { p.fps },
             // erst ab FFmpeg > 9.0 vorhanden
             if (p.dup_frames || p.probe) && ffmpeg_has_dup_frames() { ":dup_frames=1" } else { "" },
             p.width,
-            p.height
+            p.height,
+            // gfxcapture zeichnet jedes Bild mit einem Shader neu und glättet dabei. Bei 1:1
+            // gibt es nichts zu glätten: Punktabtastung ist pixelgleich und billiger. Muss
+            // doch skaliert werden, bleibt es bei der weichen Skalierung.
+            if p.native && gfx_has(&GFX_SCALE_MODE) { ":scale_mode=point" } else { "" },
+            // Desktop ist deckend: Farben so übernehmen, wie Windows sie zusammensetzt
+            // (spart das Zurückrechnen der Transparenz)
+            if gfx_has(&GFX_PREMULT) { ":premultiplied=1" } else { "" }
         )
     };
+    // Farben: Umrechnung RGB → YUV und Kennzeichnung im Video müssen zusammenpassen, sonst
+    // nimmt das Tablet eine andere Farbmatrix an (leicht verschobene Farben).
+    // - NVENC rechnet RGB selbst mit BT.601 (begrenzter Bereich) um und kennzeichnet das.
+    // - Intel: Umrechnung ausdrücklich BT.709/begrenzt; vpp_qsv vermerkt das am Bild, der
+    //   Encoder schreibt es dann ins Video (ältere Intel-Laufzeit: wie bisher).
+    // - Software: swscale rechnet mit BT.601/begrenzt → genau das am Bild vermerken.
+    // - AMD: wie bisher (hier nicht testbar).
+    // Bewusst nur am Bild, nicht als Encoder-Option: die würde ffmpeg als Vorgabe in den
+    // Filtergraphen tragen und ggf. eine zusätzliche Umrechnung einbauen.
     let post = match p.encoder {
         Encoder::Nvenc | Encoder::Amf => "",
-        Encoder::Qsv => ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12",
-        Encoder::Software => ",hwdownload,format=bgra,format=yuv420p",
+        Encoder::Qsv => {
+            ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited"
+        }
+        Encoder::Software => {
+            ",hwdownload,format=bgra,format=yuv420p,setparams=colorspace=smpte170m:range=tv"
+        }
     };
     let c = match p.codec {
         Codec::Avc => "h264",
         Codec::Hevc => "hevc",
     };
+    // „Maximal“: mehr Puffer, damit detailreiche Bilder nicht gröber werden müssen
+    // (kostet bei großen Änderungen wenige Millisekunden über USB)
+    let max = cfg.quality_max;
     let b = p.bitrate.to_string();
-    let buf = (p.bitrate / p.fps.max(1) as u64 * 4).to_string(); // ~4 Bilder Puffer
+    let frames_buf = if max { 8 } else { 4 };
+    let buf = (p.bitrate / p.fps.max(1) as u64 * frames_buf).to_string(); // ~4 Bilder Puffer
     let gop = (p.fps * 2).to_string();
 
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "warning", "-nostdin"]
@@ -156,14 +199,14 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
 
     let enc: Vec<String> = match p.encoder {
         Encoder::Nvenc => {
-            let mut v = vec![
-                format!("{c}_nvenc"),
-                "-preset".into(),
-                "p1".into(),
-                "-tune".into(),
-                "ull".into(),
-                "-rc".into(),
-                "cbr".into(),
+            let mut v = vec![format!("{c}_nvenc"), "-preset".into()];
+            if max {
+                // gleichbleibende Qualität (nahezu verlustfrei), Datenrate nach oben begrenzt
+                v.extend(["p4", "-tune", "ull", "-rc", "vbr", "-cq", "19"].map(String::from));
+            } else {
+                v.extend(["p1", "-tune", "ull", "-rc", "cbr"].map(String::from));
+            }
+            v.extend([
                 "-zerolatency".into(),
                 "1".into(),
                 "-delay".into(),
@@ -172,7 +215,7 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
                 "1".into(),
                 "-bf".into(),
                 "0".into(),
-            ];
+            ]);
             if p.codec == Codec::Avc {
                 v.extend(["-profile:v".into(), "high".into()]);
             }
@@ -216,9 +259,11 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
     };
     a.push("-c:v".into());
     a.extend(enc);
+    let nv_cq = max && p.encoder == Encoder::Nvenc;
     a.extend([
         "-b:v".into(),
-        b.clone(),
+        // gleichbleibende Qualität: keine Ziel-Datenrate, nur die Obergrenze
+        if nv_cq { "0".into() } else { b.clone() },
         "-maxrate".into(),
         b,
         "-bufsize".into(),
@@ -237,9 +282,16 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
 }
 
 static DUP_FRAMES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// gfxcapture kennt scale_mode / premultiplied (je nach FFmpeg-Version)
+static GFX_SCALE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static GFX_PREMULT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn ffmpeg_has_dup_frames() -> bool {
     DUP_FRAMES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn gfx_has(flag: &std::sync::atomic::AtomicBool) -> bool {
+    flag.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Prüft, ob ffmpeg vorhanden ist und den gfxcapture-Filter kennt; merkt sich,
@@ -256,6 +308,8 @@ pub fn check_ffmpeg(path: &str) -> Result<bool> {
         s.contains("dup_frames"),
         std::sync::atomic::Ordering::Relaxed,
     );
+    GFX_SCALE_MODE.store(s.contains("scale_mode"), std::sync::atomic::Ordering::Relaxed);
+    GFX_PREMULT.store(s.contains("premultiplied"), std::sync::atomic::Ordering::Relaxed);
     Ok(s.contains("gfxcapture") && !s.to_lowercase().contains("unknown filter"))
 }
 
@@ -319,14 +373,15 @@ pub enum StreamEnd {
 pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<StreamEnd> {
     let args = ffmpeg_args(cfg, p);
     crate::log!("ffmpeg {}", args.join(" "));
-    let mut child = command(&cfg.ffmpeg_exe)
-        .args(&args)
+    let mut cmd = command(&cfg.ffmpeg_exe);
+    cmd.args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = crate::util::spawn_stream(&mut cmd, cfg.stream_priority)
         .context("ffmpeg konnte nicht gestartet werden")?;
-    crate::util::bind_to_us(&child);
+    // Übertragung arbeitet in Echtzeit: auf dem Akku nicht drosseln
+    crate::util::high_qos_current_thread();
 
     if let Some(err) = child.stderr.take() {
         std::thread::spawn(move || {
@@ -346,6 +401,7 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
     // ist (kurze Schreibpause) und können es ohne ein Bild Verzögerung senden.
     let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(256);
     std::thread::spawn(move || {
+        crate::util::high_qos_current_thread();
         let mut buf = vec![0u8; 256 * 1024];
         loop {
             match out.read(&mut buf) {
@@ -367,12 +423,23 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
     let mut pending = false;
     let mut last_ping = Instant::now();
     let mut cam_sent = String::new();
+    // verlustfreie Standbilder nur, wenn jedes Pixel 1:1 aufs Panel geht und Bilder nur bei
+    // Änderungen kommen (bei gleichmäßigem Bildstrom gäbe es nie einen Stillstand)
+    let mut stills = crate::still::Stills::new(
+        cfg.lossless_stills && p.pixel_exact && !p.dup_frames && !p.probe,
+        p.hmonitor,
+        p.width,
+        p.height,
+        cfg.capture_cursor,
+    );
 
     let res: Result<StreamEnd> = loop {
         // nie unbegrenzt blockieren, damit „Beenden“ greift; 100 ms, damit die Anzeige
         // der Lautstärke auch bei stehendem Bild sofort reagiert
         let msg = rx.recv_timeout(if pending {
             idle
+        } else if stills.busy() {
+            Duration::from_millis(20)
         } else {
             Duration::from_millis(100)
         });
@@ -432,6 +499,7 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
                 failed = Some(e);
             }
         }
+        let sent_before = frames;
         for au in aus.drain(..) {
             // fortlaufend über Encoder-Neustarts hinweg (das Tablet sieht nie Rücksprünge)
             let pts = clock_ns() / 1000;
@@ -447,6 +515,16 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
                 break;
             }
             frames += 1;
+        }
+        if frames != sent_before {
+            stills.on_frame();
+        }
+        if failed.is_none() {
+            if let Some(still) = stills.poll() {
+                if let Err(e) = crate::proto::write_frame(sock, crate::proto::T_STILL, &still) {
+                    failed = Some(e);
+                }
+            }
         }
         if let Some(e) = failed {
             crate::log!("Video-Verbindung beendet: {e}");
@@ -497,6 +575,8 @@ mod tests {
             capture_gpu,
             dup_frames: true,
             probe: false,
+            native: true,
+            pixel_exact: true,
         }
     }
 
@@ -525,5 +605,51 @@ mod tests {
         p.probe = true;
         let a = ffmpeg_args(&cfg, &p);
         assert!(a.iter().any(|s| s.contains(":max_framerate=5:") && s.contains(":dup_frames=1")));
+    }
+
+    #[test]
+    fn capture_without_smoothing_only_at_native_size() {
+        let cfg = Config::default();
+        GFX_SCALE_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut p = params(None);
+        assert!(ffmpeg_args(&cfg, &p).iter().any(|s| s.contains(":scale_mode=point")));
+        p.native = false; // muss skaliert werden → weich wie bisher
+        assert!(!ffmpeg_args(&cfg, &p).iter().any(|s| s.contains("scale_mode")));
+    }
+
+    #[test]
+    fn colour_conversion_is_tagged() {
+        let cfg = Config::default();
+        let mut p = params(None);
+        p.encoder = Encoder::Qsv;
+        let a = ffmpeg_args(&cfg, &p);
+        assert!(a.iter().any(|s| s.contains("vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited")));
+        p.encoder = Encoder::Software;
+        let a = ffmpeg_args(&cfg, &p);
+        assert!(a.iter().any(|s| s.contains("setparams=colorspace=smpte170m:range=tv")));
+        // keine Encoder-Option (würde ffmpeg als Vorgabe in den Filtergraphen tragen)
+        assert!(!a.contains(&"-colorspace".to_string()));
+    }
+
+    #[test]
+    fn maximum_quality() {
+        let mut cfg = Config::default();
+        cfg.quality_max = true;
+        assert_eq!(bitrate_for(&cfg, 2000, 1200, 60, Codec::Hevc), MAX_BITRATE);
+        let mut p = params(None);
+        p.bitrate = MAX_BITRATE;
+        let a = ffmpeg_args(&cfg, &p);
+        let i = a.iter().position(|s| s == "-rc").unwrap();
+        assert_eq!(a[i + 1], "vbr");
+        assert!(a.windows(2).any(|w| w[0] == "-cq" && w[1] == "19"));
+        assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "0"));
+        assert!(a.windows(2).any(|w| w[0] == "-maxrate" && w[1] == "100000000"));
+        // andere Encoder: höchste Datenrate, gleichbleibend
+        p.encoder = Encoder::Qsv;
+        let a = ffmpeg_args(&cfg, &p);
+        assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "100000000"));
+        cfg.quality_max = false;
+        cfg.bitrate_mbps = 40;
+        assert_eq!(bitrate_for(&cfg, 2000, 1200, 60, Codec::Hevc), 40_000_000);
     }
 }

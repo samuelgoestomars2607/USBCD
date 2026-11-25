@@ -37,6 +37,9 @@ object Proto {
     const val T_DECODER = 0x17
     /** Tablet → PC: bitte ein Schlüsselbild */
     const val T_KEY_REQUEST = 0x18
+    /** PC → Tablet: verlustfreies Standbild [Breite u32][Höhe u32][Format u8][zlib-RGBA] */
+    const val T_STILL = 0x19
+    const val STILL_RGBA_ZLIB = 1
 
     const val VF_KEY = 1
     const val VF_CONFIG = 2

@@ -50,6 +50,22 @@ pub enum Event {
     Touch(Vec<Touch>),
 }
 
+/// Druckkurve des S Pen (0–1024): „weich“ = wenig Kraft für kräftige Striche, „hart“ =
+/// feinere Abstufung bei leichtem Druck. Linear (Standard) bleibt unverändert. Anfang und
+/// Ende bleiben gleich, ein berührender Stift behält immer etwas Druck.
+pub fn pressure_curve(p: u16, curve: &str) -> u16 {
+    let exp = match curve {
+        "soft" => 0.6,
+        "hard" => 1.6,
+        _ => return p,
+    };
+    if p == 0 {
+        return 0;
+    }
+    let x = (p.min(1024) as f32 / 1024.0).powf(exp);
+    ((x * 1024.0).round() as u16).clamp(1, 1024)
+}
+
 fn u16_at(b: &[u8], i: usize) -> u16 {
     u16::from_be_bytes([b[i], b[i + 1]])
 }
@@ -503,5 +519,24 @@ mod tests {
         assert_eq!((p.x, p.y), (-2000, 120));
         let p = map(65535, 65535, &a);
         assert_eq!((p.x, p.y), (-1, 1319));
+    }
+
+    #[test]
+    fn pressure_curves() {
+        for c in ["linear", "soft", "hard", "unbekannt"] {
+            assert_eq!(pressure_curve(0, c), 0);
+            assert_eq!(pressure_curve(1024, c), 1024);
+            assert!(pressure_curve(1, c) >= 1);
+        }
+        assert_eq!(pressure_curve(512, "linear"), 512);
+        assert!(pressure_curve(256, "soft") > 256);
+        assert!(pressure_curve(256, "hard") < 256);
+        // stetig steigend
+        let mut last = 0;
+        for p in 0..=1024 {
+            let v = pressure_curve(p, "hard");
+            assert!(v >= last);
+            last = v;
+        }
     }
 }

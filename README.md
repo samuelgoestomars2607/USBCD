@@ -97,13 +97,14 @@ USBCD runs as an **icon in the notification area** (possibly under ^). Click it 
 | Devices | all known devices; check mark = use as screen, click toggles. New devices appear as “New: … – use as screen” |
 | Send sound to tablet | sound transmission on/off |
 | Touch and pen on the tablet | fingers and S Pen operate Windows on the tablet monitor (default: on) |
+| Pen pressure | Soft (little force needed) · Linear (default) · Firm (finer at light pressure) |
 | Info overlay on the tablet | frames/s, data rate, decode time and USB round trip at the top left (default: off) |
 | Turn tablet off and on with the PC screen | when the PC screen turns off or the PC is locked, the tablet display turns off too – and back on (default: on) |
 | Tablet selfie camera as webcam | adds the camera “USBCD Tablet Webcam” to Windows (default: off) – see below |
 | “Do not disturb” on the tablet while it is a monitor | no notifications over the picture; afterwards as before. Needs a one-time permission on the tablet (default: off) |
 | Tablet volume buttons control the tablet speakers | the tablet buttons turn “USBCD Tablet Speakers” in Windows up/down, shown on the tablet (default: on) |
 | Switch tablet off (picture and sound) | removes the tablet monitor and turns the tablet display off without unplugging; the same item switches it back on |
-| Picture quality | Data saver (10 Mbit/s) · Standard (automatic) · High (40 Mbit/s) |
+| Picture quality | Data saver (10 Mbit/s) · Standard (automatic) · High (40 Mbit/s) · Maximum (constant quality) – plus *Lossless still images*, see [Colour accuracy](#colour-accuracy) |
 | Tablet brightness | 100 % · 75 % · 50 % · 25 % – applies immediately |
 | Sound settings / Display settings | opens the Windows settings |
 | Open settings and log | folder with `usbcd.toml` and `usbcd.log` |
@@ -188,14 +189,55 @@ the notification was skipped.
 | `hide_cable_output` | `true` | hide the recording side "CABLE Output" (programs then can't record the tablet sound as a microphone) |
 | `display_position` | – | remembered automatically when you move the tablet monitor in the Windows display settings; delete the line = back to "right of the main screen" |
 | `tablet_input` | `true` | touch and S Pen control Windows (also in the menu) |
+| `pen_pressure` | `"linear"` | pressure curve of the S Pen: `soft` / `linear` / `hard` (also in the menu) |
 | `show_stats` | `false` | info overlay on the tablet (also in the menu) |
 | `follow_pc_power` | `true` | tablet display off/on together with the PC screen (also in the menu) |
 | `webcam` | `false` | tablet front camera as a webcam (also in the menu) |
 | `tablet_dnd` | `false` | "Do not disturb" on the tablet while it is a monitor (also in the menu) |
 | `tablet_volume_keys` | `true` | the tablet's volume keys control the tablet speakers (also in the menu) |
 | `sparse_frames` | `true` | send frames only when something changes – only for tablets whose decoder outputs every frame immediately (the app checks this itself); saves GPU, USB and tablet battery |
+| `quality_max` | `false` | picture quality *Maximum* (also in the menu) |
+| `lossless_stills` | `false` | lossless still images (also in the menu) |
+| `stream_priority` | `true` | priority for the picture transmission: GPU "high", CPU "above normal" for FFmpeg; `false` if another program (e.g. a game or Parsec) suffers from it |
 | `update_check` | `true` | check for a new version shortly after start and daily (also in the menu) |
 | `update_skip` | `""` | don't offer this version by notification anymore (set by "Skip this version") |
+
+## Colour accuracy
+
+For design work, how exactly colours arrive matters most:
+
+* **Colour conversion:** USBCD converts the picture with a fixed colour matrix and marks it in the
+  video, so the tablet decodes the colours exactly as intended.
+* **Picture quality → Maximum:** constant quality instead of a constant data rate (NVIDIA; other
+  graphics chips use the highest data rate). Needs more data – no problem over USB – and on large
+  changes a few milliseconds more latency. Meant for powerful PCs.
+* **Lossless still images** (menu *Picture quality*): when the picture stands still for a moment,
+  USBCD sends a pixel-exact image afterwards – exact colour values, full colour resolution (no
+  fringes on red or blue text), no compression traces. As soon as something moves, the normal
+  video takes over again. Only works when the tablet monitor runs at the tablet's native resolution.
+  If something keeps blinking (e.g. a text cursor), still images pause so the picture does not keep
+  switching between sharp and soft. Costs some CPU time on the PC – meant for powerful PCs.
+* **Colour profile:** the tablet's panel is not calibrated at the factory. With a colorimeter you can
+  measure it (e.g. with [DisplayCAL](https://displaycal.net/)) and assign the profile to the tablet
+  monitor in Windows (*Color management*). Colour-managed programs (Photoshop, Affinity, Krita,
+  browsers) then show accurate colours. Create a **profile only**, without calibration curves – Windows
+  may not apply those to a virtual monitor. The assignment stays, because the tablet monitor
+  reappears with the same identity every time.
+* On the tablet, turn off blue-light filters (Samsung: *Eye comfort shield*) for colour work.
+
+## Tips for weak laptops
+
+Laptops without a dedicated graphics card share one graphics chip between the desktop, the browser,
+recording and encoding. USBCD gives its transmission priority on its own (`stream_priority`). What also helps:
+
+* **Plug in the charger.** On battery, Windows and the graphics chip run slower. Settings → System →
+  Power → *Power mode: Best performance*.
+* **Intel graphics:** the Intel Graphics Command Center (Intel Graphics Software) has separate power
+  plans for battery and mains.
+* **Smaller resolution** for the tablet monitor in the Windows display settings (e.g. 1600 × 960) –
+  the tablet upscales it.
+* **Fewer effects:** transparency effects and animations in Windows also cost graphics power
+  (Settings → Accessibility → Visual effects).
 
 ## Troubleshooting
 
@@ -264,8 +306,8 @@ android/    Android Studio project (Kotlin, no third-party libraries)
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
             res/values (English), res/values-de (German), adaptive icon with monochrome layer
 host/       Rust: main (device loop, app installation), tray (menu), session, helper (service
-            and access), auth (pairing), vdd, display, driver, video, nal, audio, autostart,
-            i18n, config, proto, adb, util
+            and access), auth (pairing), vdd, display, driver, video, still (lossless still
+            images), nal, audio, autostart, i18n, config, proto, adb, util
 installer/  Setup bauen.cmd · build-installer.ps1 · USBCD.iss (de/en) · setup-helper.ps1 · diagnose.ps1
             · deps.lock.json (checksums) · info pages · THIRD-PARTY.txt
 ```

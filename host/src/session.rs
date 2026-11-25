@@ -419,11 +419,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         );
     }
     let (codec, fps) = choose(cfg, &hello, encoder);
-    let bitrate = if cfg.bitrate_mbps > 0 {
-        cfg.bitrate_mbps as u64 * 1_000_000
-    } else {
-        video::auto_bitrate(sw, sh, fps, codec)
-    };
+    let bitrate = video::bitrate_for(cfg, sw, sh, fps, codec);
     crate::util::set_status(&format!(
         "{}: {name} · {sw}×{sh} · {fps} Hz",
         crate::i18n::tr("Verbunden", "Connected")
@@ -460,6 +456,8 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         probe: cfg.sparse_frames
             && cfg_serial_prompt(cfg, serial).is_none()
             && video::has_dup_frames(),
+        native: is_native(&vd.device_name, sw, sh),
+        pixel_exact: is_native(&vd.device_name, sw, sh) && (sw, sh) == (w, h),
     };
     video::set_sparse(!params.dup_frames);
     video::set_probing(params.probe);
@@ -528,9 +526,16 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                         params.encoder
                     );
                 }
-                std::thread::sleep(Duration::from_millis(800));
-                // Windows kann den Monitor neu angelegt haben (Anordnung geändert,
-                // Grafiktreiber neu gestartet) – dann gilt ein neues Monitor-Handle
+                // Einmaliger Absturz bei unverändertem Monitor (z. B. Intel „Invalid
+                // FrameType“): sofort neu starten. Sonst kurz warten – Windows kann den
+                // Monitor gerade neu anlegen (Anordnung geändert, Grafiktreiber neu gestartet).
+                let same_monitor = display::hmonitor_for(&vd.device_name) == Some(params.hmonitor);
+                std::thread::sleep(Duration::from_millis(if restarts == 1 && same_monitor {
+                    50
+                } else {
+                    800
+                }));
+                // dann gilt ggf. ein neues Monitor-Handle
                 if let Some(hm) = display::hmonitor_for(&vd.device_name) {
                     if hm != params.hmonitor {
                         crate::log!("Tablet-Monitor neu erkannt");
@@ -559,11 +564,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                     video::set_sparse(!dup);
                 }
                 resize(&mut params, &cur, &vd.device_name, (w, h, hz));
-                params.bitrate = if cur.bitrate_mbps > 0 {
-                    cur.bitrate_mbps as u64 * 1_000_000
-                } else {
-                    video::auto_bitrate(params.width, params.height, fps, codec)
-                };
+                params.bitrate = video::bitrate_for(&cur, params.width, params.height, fps, codec);
                 if cur.audio_enabled != audio.is_some() {
                     audio = None; // alte Ton-Übertragung zuerst beenden
                     if cur.audio_enabled {
@@ -663,6 +664,8 @@ fn stream_size(device: &str, w: u32, h: u32, hz: u32) -> (u32, u32) {
 /// Bitrate) anpassen; das Tablet bekommt die neue Größe mit der nächsten CONFIG.
 fn resize(params: &mut StreamParams, cfg: &Config, device: &str, tablet: (u32, u32, u32)) {
     let (sw, sh) = stream_size(device, tablet.0, tablet.1, tablet.2);
+    params.native = is_native(device, sw, sh);
+    params.pixel_exact = params.native && (sw, sh) == (tablet.0, tablet.1);
     if (sw, sh) == (params.width, params.height) {
         return;
     }
@@ -673,9 +676,12 @@ fn resize(params: &mut StreamParams, cfg: &Config, device: &str, tablet: (u32, u
     );
     params.width = sw;
     params.height = sh;
-    if cfg.bitrate_mbps == 0 {
-        params.bitrate = video::auto_bitrate(sw, sh, params.fps, params.codec);
-    }
+    params.bitrate = video::bitrate_for(cfg, sw, sh, params.fps, params.codec);
+}
+
+/// Hat der Tablet-Monitor genau die Übertragungsgröße? (dann muss nichts skaliert werden)
+fn is_native(device: &str, w: u32, h: u32) -> bool {
+    matches!(display::mode_of(device), Some((mw, mh, _)) if (mw, mh) == (w, h))
 }
 
 /// Liest, was das Tablet auf der Video-Verbindung zurückschickt: Touch/Stift, PONG,
@@ -695,11 +701,16 @@ impl InputReader {
             while let Ok((t, p)) = crate::proto::read_frame_max(&mut rd, 2 << 20) {
                 match t {
                     crate::proto::T_INPUT => {
-                        if !crate::config::current().tablet_input {
+                        let c = crate::config::current();
+                        if !c.tablet_input {
                             injector = None; // ausgeschaltet: offene Berührungen beenden
                             continue;
                         }
-                        if let Some(ev) = crate::input::parse(&p) {
+                        if let Some(mut ev) = crate::input::parse(&p) {
+                            if let crate::input::Event::Pen(pen) = &mut ev {
+                                pen.pressure =
+                                    crate::input::pressure_curve(pen.pressure, &c.pen_pressure);
+                            }
                             injector
                                 .get_or_insert_with(|| crate::input::Injector::new(vd.clone()))
                                 .handle(ev);

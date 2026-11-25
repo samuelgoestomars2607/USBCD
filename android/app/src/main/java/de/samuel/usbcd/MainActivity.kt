@@ -36,6 +36,10 @@ import android.widget.TextView
  */
 class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var surfaceView: SurfaceView
+    /** verlustfreies Standbild vom PC, liegt über dem Video bis zum nächsten Videobild */
+    private lateinit var stillView: ImageView
+    /** Entpacken der Standbilder – nie im UI- oder Lese-Thread */
+    private val stillDecode = java.util.concurrent.Executors.newSingleThreadExecutor()
     private lateinit var overlay: FrameLayout
     private lateinit var statusView: TextView
     private lateinit var detailView: TextView
@@ -85,6 +89,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
         root.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
+        stillView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_XY
+            visibility = View.GONE
+        }
+        root.addView(stillView, FrameLayout.LayoutParams(-1, -1))
         root.addView(buildOverlay(), FrameLayout.LayoutParams(-1, -1))
         statsView = TextView(this).apply {
             typeface = Fonts.get(this@MainActivity, 500)
@@ -127,6 +136,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             onBlocked = { blocked -> runOnUiThread { if (blocked) showBlocked() else showWaiting() } },
             onCamera = { j -> camera?.control(j) },
             onVolume = { j -> runOnUiThread { showVolume(j) } },
+            onStill = { data, gen -> showStill(data, gen) },
+            onStillHide = { runOnUiThread { hideStill() } },
         ).also { it.start() }
         updateRotation()
         getSystemService(DisplayManager::class.java)?.registerDisplayListener(displayListener, ui)
@@ -184,6 +195,79 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         volumePill.visibility = View.VISIBLE
         ui.removeCallbacks(hidePill)
         ui.postDelayed(hidePill, 1500)
+    }
+
+    // --- Verlustfreie Standbilder ----------------------------------------------
+
+    /**
+     * Steht das Bild am PC still, schickt USBCD ein pixelgenaues Bild (exakte Farben, volle
+     * Farbauflösung). Es wird nur gezeigt, wenn es genau die Auflösung des Displays hat
+     * (1:1 aufs Panel) und seitdem kein neues Videobild kam.
+     */
+    private fun showStill(data: ByteArray, gen: Long) {
+        try {
+            stillDecode.execute {
+                val bm = decodeStill(data) ?: return@execute
+                runOnUiThread {
+                    val srv = server
+                    val (w, h) = DisplayInfo.landscapeSize(mode)
+                    if (srv == null || !showingVideo || bm.width != w || bm.height != h) {
+                        bm.recycle()
+                        return@runOnUiThread
+                    }
+                    // erst als sichtbar markieren, dann prüfen: kommt gleichzeitig ein
+                    // Videobild, wird das Standbild sicher wieder entfernt
+                    srv.stillVisible.set(true)
+                    if (srv.videoGen != gen) {
+                        srv.stillVisible.set(false)
+                        bm.recycle()
+                        return@runOnUiThread
+                    }
+                    stillView.setImageBitmap(bm)
+                    stillView.visibility = View.VISIBLE
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun hideStill() {
+        if (stillView.visibility != View.GONE) {
+            stillView.visibility = View.GONE
+            stillView.setImageDrawable(null)
+        }
+    }
+
+    /** [Breite u32][Höhe u32][Format u8][zlib-RGBA] → Bitmap; null bei Unstimmigkeiten. */
+    private fun decodeStill(data: ByteArray): android.graphics.Bitmap? {
+        if (data.size < 10) return null
+        val head = java.nio.ByteBuffer.wrap(data, 0, 9)
+        val w = head.int
+        val h = head.int
+        if (head.get().toInt() != Proto.STILL_RGBA_ZLIB) return null
+        if (w !in 1..8192 || h !in 1..8192) return null
+        val size = w.toLong() * h * 4
+        if (size > Proto.MAX_FRAME) return null
+        val px = ByteArray(size.toInt())
+        val inf = java.util.zip.Inflater()
+        try {
+            inf.setInput(data, 9, data.size - 9)
+            var off = 0
+            while (off < px.size && !inf.finished()) {
+                val n = inf.inflate(px, off, px.size - off)
+                if (n == 0 && (inf.needsInput() || inf.needsDictionary())) break
+                off += n
+            }
+            if (off != px.size) return null
+        } catch (e: Exception) {
+            Log.w(TAG, "Standbild fehlerhaft", e)
+            return null
+        } finally {
+            inf.end()
+        }
+        return android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).apply {
+            copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
+        }
     }
 
     // --- Info-Anzeige ---------------------------------------------------------
@@ -307,6 +391,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun showOverlay() {
         showingVideo = false
+        hideStill()
         overlay.animate().cancel()
         overlay.alpha = 1f
         overlay.visibility = View.VISIBLE
@@ -410,6 +495,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         ui.removeCallbacks(hidePill)
         dnd.release()
         keyOut.shutdown()
+        stillDecode.shutdown()
         server?.stop()
         server = null
         getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(displayListener)

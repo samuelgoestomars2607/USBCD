@@ -16,6 +16,7 @@ mod nal;
 mod notify;
 mod proto;
 mod session;
+mod still;
 mod tray;
 mod update;
 mod util;

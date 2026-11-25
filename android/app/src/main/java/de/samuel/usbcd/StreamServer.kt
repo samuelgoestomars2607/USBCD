@@ -27,7 +27,21 @@ class StreamServer(
     private val onCamera: (JSONObject?) -> Unit,
     /** Neue Windows-Lautstärke nach einer Lautstärketaste */
     private val onVolume: (JSONObject) -> Unit,
+    /** Verlustfreies Standbild vom PC (Daten, Nummer des letzten Videobilds davor) */
+    private val onStill: (ByteArray, Long) -> Unit = { _, _ -> },
+    /** Standbild entfernen (neues Videobild, neue Einstellungen, Verbindung beendet) */
+    private val onStillHide: () -> Unit = {},
 ) {
+    /** Zähler der Videobilder: ein Standbild gilt nur, solange kein neueres kam */
+    @Volatile var videoGen = 0L
+        private set
+    /** liegt gerade ein Standbild über dem Video? */
+    val stillVisible = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun hideStill() {
+        if (stillVisible.getAndSet(false)) onStillHide()
+    }
+
     @Volatile private var running = true
     /** Rückkanal der aktuellen Video-Verbindung (Touch/Stift, PONG) */
     @Volatile private var videoOut: DataOutputStream? = null
@@ -128,12 +142,24 @@ class StreamServer(
                         // gleiche Einstellungen (nur neue Bildqualität): Bild läuft einfach weiter
                         // erstes Verbinden dieses Tablets: Bild erst nach der Dekoder-Prüfung zeigen
                         val check = c.optBoolean("check", false)
+                        hideStill()
                         if (video.configure(codec, w, h, fps, check)) {
                             Stats.stream = "${codec.uppercase()} · ${w}×${h} · $fps Hz"
                             onState(true, Stats.stream)
                         }
                     }
-                    Proto.T_VIDEO -> video.feed(inp, len)
+                    Proto.T_VIDEO -> {
+                        // neues Bild: ein liegendes Standbild ist ab jetzt veraltet
+                        videoGen++
+                        hideStill()
+                        video.feed(inp, len)
+                    }
+                    Proto.T_STILL -> {
+                        val buf = ByteArray(len)
+                        inp.readFully(buf)
+                        Stats.bytesIn.addAndGet(len.toLong() + 5)
+                        onStill(buf, videoGen)
+                    }
                     Proto.T_PING -> {
                         val buf = ByteArray(len)
                         inp.readFully(buf)
@@ -166,6 +192,7 @@ class StreamServer(
             }
         } finally {
             videoOut = null
+            hideStill()
             onCamera(null)
             video.stop()
             onState(false, "")

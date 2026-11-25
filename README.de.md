@@ -99,13 +99,14 @@ USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick 
 | Geräte | alle bekannten Geräte; Haken = als Bildschirm verwenden, Klick schaltet um. Neue Geräte stehen hier mit „Neu: … – als Bildschirm verwenden“ |
 | Ton zum Tablet übertragen | Ton-Übertragung ein/aus |
 | Touch und Stift am Tablet | Finger und S Pen bedienen Windows auf dem Tablet-Monitor (Standard: an) |
+| Stiftdruck | Weich (wenig Kraft nötig) · Linear (Standard) · Hart (feiner bei leichtem Druck) |
 | Info-Anzeige auf dem Tablet | Bilder/s, Datenrate, Dekodierzeit und USB-Laufzeit oben links (Standard: aus) |
 | Tablet mit dem PC-Bildschirm aus- und einschalten | Geht der PC-Bildschirm aus oder wird der PC gesperrt, geht auch das Tablet-Display aus – und wieder an (Standard: an) |
 | Selfie-Kamera des Tablets als Webcam | legt in Windows die Kamera „USBCD Tablet Webcam“ an (Standard: aus) – siehe unten |
 | „Nicht stören“ auf dem Tablet, solange es Monitor ist | keine Benachrichtigungen über dem Bild; danach wie vorher. Braucht einmal die Erlaubnis auf dem Tablet (Standard: aus) |
 | Lautstärketasten des Tablets regeln den Tablet-Lautsprecher | die Tasten am Tablet stellen „USBCD Tablet Lautsprecher“ in Windows lauter/leiser, mit Anzeige auf dem Tablet (Standard: an) |
 | Tablet ausschalten (Bild und Ton) | Tablet-Monitor weg, Tablet-Display aus, ohne das Kabel zu ziehen; derselbe Menüpunkt schaltet wieder ein |
-| Bildqualität | Sparsam (10 Mbit/s) · Standard (automatisch) · Hoch (40 Mbit/s) |
+| Bildqualität | Sparsam (10 Mbit/s) · Standard (automatisch) · Hoch (40 Mbit/s) · Maximal (gleichbleibende Qualität) – dazu *Standbilder verlustfrei*, siehe [Farbtreue](#farbtreue) |
 | Tablet-Helligkeit | 100 % · 75 % · 50 % · 25 % – wirkt sofort |
 | Soundeinstellungen / Anzeigeeinstellungen | öffnet die Windows-Einstellungen |
 | Einstellungen und Log öffnen | Ordner mit `usbcd.toml` und `usbcd.log` |
@@ -193,14 +194,55 @@ steht dann **Update auf … installieren** – auch wenn die Benachrichtigung ü
 | `hide_cable_output` | `true` | Aufnahmeseite „CABLE Output“ ausblenden (Programme können den Tablet-Ton dann nicht als Mikrofon aufnehmen) |
 | `display_position` | – | Wird automatisch gemerkt, wenn du den Tablet-Monitor in den Windows-Anzeigeeinstellungen verschiebst; Zeile löschen = wieder „rechts neben dem Hauptbildschirm“ |
 | `tablet_input` | `true` | Touch und S Pen steuern Windows (auch im Menü) |
+| `pen_pressure` | `"linear"` | Druckkurve des S Pen: `soft` / `linear` / `hard` (auch im Menü) |
 | `show_stats` | `false` | Info-Anzeige auf dem Tablet (auch im Menü) |
 | `follow_pc_power` | `true` | Tablet-Display mit dem PC-Bildschirm aus/an (auch im Menü) |
 | `webcam` | `false` | Selfie-Kamera des Tablets als Webcam (auch im Menü) |
 | `tablet_dnd` | `false` | „Nicht stören“ auf dem Tablet, solange es Monitor ist (auch im Menü) |
 | `tablet_volume_keys` | `true` | Lautstärketasten des Tablets regeln den Tablet-Lautsprecher (auch im Menü) |
 | `sparse_frames` | `true` | Bilder nur bei Änderungen senden – nur bei Tablets, deren Dekoder jedes Bild sofort ausgibt (prüft die App selbst); spart Grafikkarte, USB und Tablet-Akku |
+| `quality_max` | `false` | Bildqualität *Maximal* (auch im Menü) |
+| `lossless_stills` | `false` | Standbilder verlustfrei (auch im Menü) |
+| `stream_priority` | `true` | Vorrang für die Bildübertragung: Grafikchip „hoch“, CPU „höher als normal“ für FFmpeg; `false`, falls ein anderes Programm (z. B. ein Spiel oder Parsec) darunter leidet |
 | `update_check` | `true` | Kurz nach dem Start und täglich nach einer neuen Version sehen (auch im Menü) |
 | `update_skip` | `""` | Diese Version nicht mehr per Benachrichtigung anbieten (wird von „Diese Version überspringen“ gesetzt) |
+
+## Farbtreue
+
+Für Gestaltungsarbeit zählt vor allem, wie genau die Farben ankommen:
+
+* **Farbumrechnung:** USBCD rechnet das Bild mit einer festen Farbmatrix um und vermerkt sie im
+  Video – das Tablet dekodiert die Farben so, wie sie gemeint sind.
+* **Bildqualität → Maximal:** gleichbleibende Qualität statt gleichbleibender Datenrate (NVIDIA;
+  andere Grafikchips nutzen die höchste Datenrate). Braucht mehr Daten – über USB kein Problem – und
+  bei großen Änderungen wenige Millisekunden mehr Verzögerung. Gedacht für starke PCs.
+* **Standbilder verlustfrei** (Menü *Bildqualität*): Steht das Bild kurz still, schickt USBCD ein
+  pixelgenaues Bild hinterher – exakte Farbwerte, volle Farbauflösung (kein Farbsaum an roter oder
+  blauer Schrift), keine Kompressionsspuren. Sobald sich etwas bewegt, übernimmt wieder das normale
+  Video. Nur, wenn der Tablet-Monitor in der nativen Auflösung des Tablets läuft. Blinkt etwas
+  dauerhaft (z. B. ein Text-Cursor), pausieren die Standbilder, damit das Bild nicht ständig zwischen
+  scharf und weich wechselt. Kostet am PC etwas Rechenzeit – gedacht für starke PCs.
+* **Farbprofil:** Das Panel des Tablets ist ab Werk nicht kalibriert. Mit einem Messgerät lässt es
+  sich vermessen (z. B. mit [DisplayCAL](https://displaycal.net/)) und das Profil in Windows dem
+  Tablet-Monitor zuordnen (*Farbverwaltung*). Farbverwaltete Programme (Photoshop, Affinity, Krita,
+  Browser) zeigen dann genaue Farben. **Nur ein Profil** erstellen, ohne Kalibrierkurven – die wendet
+  Windows auf einem virtuellen Monitor möglicherweise nicht an. Die Zuordnung bleibt, weil der
+  Tablet-Monitor jedes Mal mit derselben Kennung erscheint.
+* Am Tablet für Farbarbeit Blaulichtfilter ausschalten (Samsung: *Augenkomfort* bzw. *Blaulichtfilter*).
+
+## Tipps für schwache Laptops
+
+Laptops ohne eigene Grafikkarte teilen einen Grafikchip zwischen Desktop, Browser, Aufnahme und
+Kodierung. USBCD gibt seiner Übertragung selbst Vorrang (`stream_priority`). Außerdem hilft:
+
+* **Netzteil anschließen.** Auf dem Akku laufen Windows und der Grafikchip langsamer. Einstellungen →
+  System → Energie → *Energiemodus: Beste Leistung*.
+* **Intel-Grafik:** Im Intel Graphics Command Center (Intel Graphics Software) gibt es getrennte
+  Energiepläne für Akku und Netzbetrieb.
+* **Kleinere Auflösung** für den Tablet-Monitor in den Windows-Anzeigeeinstellungen (z. B. 1600 × 960)
+  – das Tablet rechnet sie hoch.
+* **Weniger Effekte:** Transparenzeffekte und Animationen in Windows kosten ebenfalls Grafikleistung
+  (Einstellungen → Barrierefreiheit → Visuelle Effekte).
 
 ## Fehlersuche
 
@@ -270,8 +312,8 @@ android/    Android-Studio-Projekt (Kotlin, keine Fremdbibliotheken)
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
             res/values (Englisch), res/values-de (Deutsch), adaptives Icon mit Monochrom-Ebene
 host/       Rust: main (Geräte-Schleife, App-Installation), tray (Menü), session, helper (Dienst
-            und Zugang), auth (Anmeldung), vdd, display, driver, video, nal, audio, autostart,
-            i18n, config, proto, adb, util
+            und Zugang), auth (Anmeldung), vdd, display, driver, video, still (verlustfreie
+            Standbilder), nal, audio, autostart, i18n, config, proto, adb, util
 installer/  Setup bauen.cmd · build-installer.ps1 · USBCD.iss (de/en) · setup-helper.ps1 · diagnose.ps1
             · deps.lock.json (Prüfsummen) · Erklärseiten · THIRD-PARTY.txt
 ```

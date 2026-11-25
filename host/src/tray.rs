@@ -123,6 +123,10 @@ const ID_AUDIO: usize = 10;
 const ID_Q_LOW: usize = 20;
 const ID_Q_STD: usize = 21;
 const ID_Q_HIGH: usize = 22;
+const ID_Q_MAX: usize = 23;
+const ID_STILLS: usize = 24;
+const ID_PEN_BASE: usize = 60; // 60..=62 → weich/linear/hart
+const PEN_CURVES: [&str; 3] = ["soft", "linear", "hard"];
 const ID_B_BASE: usize = 30; // 30..=33 → 100/75/50/25 %
 const BRIGHTNESS: [u32; 4] = [100, 75, 50, 25];
 const ID_AUTOSTART: usize = 40;
@@ -186,24 +190,57 @@ unsafe fn show_menu(hwnd: HWND) {
     let cfg = crate::config::current();
 
     let quality = CreatePopupMenu();
+    let max = cfg.quality_max;
     append(
         quality,
-        check(cfg.bitrate_mbps > 0 && cfg.bitrate_mbps <= 12),
+        check(!max && cfg.bitrate_mbps > 0 && cfg.bitrate_mbps <= 12),
         ID_Q_LOW,
         tr("Sparsam (10 Mbit/s)", "Data saver (10 Mbit/s)"),
     );
     append(
         quality,
-        check(cfg.bitrate_mbps == 0),
+        check(!max && cfg.bitrate_mbps == 0),
         ID_Q_STD,
         tr("Standard (automatisch)", "Standard (automatic)"),
     );
     append(
         quality,
-        check(cfg.bitrate_mbps > 12),
+        check(!max && cfg.bitrate_mbps > 12),
         ID_Q_HIGH,
         tr("Hoch (40 Mbit/s)", "High (40 Mbit/s)"),
     );
+    append(
+        quality,
+        check(max),
+        ID_Q_MAX,
+        tr(
+            "Maximal (gleichbleibende Qualität, für starke PCs)",
+            "Maximum (constant quality, for powerful PCs)",
+        ),
+    );
+    append(quality, MF_SEPARATOR, 0, "");
+    append(
+        quality,
+        check(cfg.lossless_stills),
+        ID_STILLS,
+        tr(
+            "Standbilder verlustfrei (exakte Farben, für starke PCs)",
+            "Lossless still images (exact colours, for powerful PCs)",
+        ),
+    );
+
+    let pen = CreatePopupMenu();
+    for (i, (curve, label)) in PEN_CURVES
+        .iter()
+        .zip([
+            tr("Weich (wenig Kraft nötig)", "Soft (little force needed)"),
+            tr("Linear (Standard)", "Linear (default)"),
+            tr("Hart (feiner bei leichtem Druck)", "Firm (finer at light pressure)"),
+        ])
+        .enumerate()
+    {
+        append(pen, check(cfg.pen_pressure == *curve), ID_PEN_BASE + i, label);
+    }
 
     let bright = CreatePopupMenu();
     for (i, b) in BRIGHTNESS.iter().enumerate() {
@@ -301,6 +338,12 @@ unsafe fn show_menu(hwnd: HWND) {
         check(cfg.tablet_input),
         ID_INPUT,
         tr("Touch und Stift am Tablet", "Touch and pen on the tablet"),
+    );
+    append(
+        m,
+        MF_STRING | MF_POPUP,
+        pen as usize,
+        tr("Stiftdruck", "Pen pressure"),
     );
     append(
         m,
@@ -447,8 +490,23 @@ fn handle_setting(id: usize) -> bool {
                 ID_Q_HIGH => 40,
                 _ => 0,
             };
-            update(|c| c.bitrate_mbps = v);
+            update(|c| {
+                c.bitrate_mbps = v;
+                c.quality_max = false;
+            });
             crate::util::request_reconnect();
+        }
+        ID_Q_MAX => {
+            update(|c| c.quality_max = true);
+            crate::util::request_reconnect();
+        }
+        ID_STILLS => {
+            update(|c| c.lossless_stills = !c.lossless_stills);
+            crate::util::request_reconnect();
+        }
+        i if (ID_PEN_BASE..ID_PEN_BASE + PEN_CURVES.len()).contains(&i) => {
+            let curve = PEN_CURVES[i - ID_PEN_BASE];
+            update(|c| c.pen_pressure = curve.into());
         }
         i if (ID_B_BASE..ID_B_BASE + BRIGHTNESS.len()).contains(&i) => {
             let b = BRIGHTNESS[i - ID_B_BASE];

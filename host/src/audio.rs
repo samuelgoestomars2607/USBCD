@@ -63,6 +63,8 @@ const E_CAPTURE: i32 = 1;
 const DEVICE_STATE_ACTIVE: u32 = 1;
 const DEVICE_STATE_DISABLED: u32 = 2;
 const AUDCLNT_STREAMFLAGS_LOOPBACK: u32 = 0x0002_0000;
+/// Windows meldet neue Daten per Ereignis (Loopback ab Windows 10 1703)
+const AUDCLNT_STREAMFLAGS_EVENTCALLBACK: u32 = 0x0004_0000;
 const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
 const AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK: i32 = 0x8;
 
@@ -543,7 +545,44 @@ unsafe fn rd<T: Copy>(base: *const u8, off: usize) -> T {
     std::ptr::read_unaligned(base.add(off) as *const T)
 }
 
+/// Ton-Thread bei Windows als Audio-Aufgabe anmelden (MMCSS): Er bekommt dann Vorrang,
+/// wenn die CPU voll ist – der Ton knackt nicht. Wird beim Verlassen zurückgenommen.
+struct MmcssAudio(*mut c_void);
+
+impl MmcssAudio {
+    fn register() -> MmcssAudio {
+        use windows_sys::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
+        let mut idx = 0u32;
+        let h = unsafe { AvSetMmThreadCharacteristicsW(wide("Audio").as_ptr(), &mut idx) };
+        if h.is_null() {
+            crate::log!("Audio: Windows-Audio-Vorrang (MMCSS) nicht verfügbar – läuft normal weiter");
+        }
+        MmcssAudio(h)
+    }
+}
+
+impl Drop for MmcssAudio {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { windows_sys::Win32::System::Threading::AvRevertMmThreadCharacteristics(self.0) };
+        }
+    }
+}
+
+/// Ereignis für „neue Ton-Daten“ (wird beim Verlassen geschlossen)
+struct EventHandle(*mut c_void);
+
+impl Drop for EventHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+        }
+    }
+}
+
 fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool) -> Result<()> {
+    let _mmcss = MmcssAudio::register();
+    crate::util::high_qos_current_thread();
     unsafe {
         let activate: unsafe extern "system" fn(
             P,
@@ -642,17 +681,44 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
             *const u8,
             *const GUID,
         ) -> HRESULT = client.f(3);
-        let hr = init(
-            client.0,
-            0,
-            AUDCLNT_STREAMFLAGS_LOOPBACK,
-            200_000,
-            0,
-            fmt,
+        // Bevorzugt ereignisgesteuert: Windows weckt den Thread, sobald Daten da sind, statt
+        // 500-mal pro Sekunde nachzufragen (spart CPU-Aufwachen und Akku). Lehnt Windows das
+        // ab, wie bisher mit regelmäßigem Nachfragen.
+        let event = EventHandle(windows_sys::Win32::System::Threading::CreateEventW(
             std::ptr::null(),
-        );
+            0,
+            0,
+            std::ptr::null(),
+        ));
+        let evented = !event.0.is_null()
+            && init(
+                client.0,
+                0,
+                AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                200_000,
+                0,
+                fmt,
+                std::ptr::null(),
+            ) >= 0;
+        let hr = if evented {
+            0
+        } else {
+            init(
+                client.0,
+                0,
+                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                200_000,
+                0,
+                fmt,
+                std::ptr::null(),
+            )
+        };
         CoTaskMemFree(fmt as *const c_void);
         check(hr, "IAudioClient::Initialize (Loopback)")?;
+        if evented {
+            let set_event: unsafe extern "system" fn(P, *mut c_void) -> HRESULT = client.f(13);
+            check(set_event(client.0, event.0), "IAudioClient::SetEventHandle")?;
+        }
 
         let get_service: unsafe extern "system" fn(P, *const GUID, *mut P) -> HRESULT =
             client.f(14);
@@ -675,8 +741,9 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
 
         let out_ch: u16 = channels.clamp(1, 2);
         crate::log!(
-            "Audio: {rate} Hz, {channels} Kanäle, {} → Tablet {out_ch} Kanäle; Lautstärke {}",
+            "Audio: {rate} Hz, {channels} Kanäle, {} → Tablet {out_ch} Kanäle; {}; Lautstärke {}",
             if is_float { "float" } else { "int" },
+            if evented { "ereignisgesteuert" } else { "regelmäßig abgefragt" },
             if post_volume {
                 "von Windows angewendet"
             } else if manual_volume {
@@ -776,7 +843,13 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
                 break Err(e.into());
             }
             let _ = sock.flush();
-            std::thread::sleep(Duration::from_millis(2));
+            if evented {
+                // Zeitgrenze: Bei Stille liefert Windows im Loopback keine Daten – Beenden und
+                // Lautstärke werden trotzdem regelmäßig geprüft
+                windows_sys::Win32::System::Threading::WaitForSingleObject(event.0, 20);
+            } else {
+                std::thread::sleep(Duration::from_millis(2));
+            }
         };
         stop_fn(client.0);
         result

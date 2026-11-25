@@ -18,6 +18,8 @@
 //!   PC → Tablet  VOLUME  JSON {level: 0–100, muted} – Anzeige nach einem Tastendruck
 //!   Tablet → PC  DECODER JSON {prompt} – gibt der Dekoder jedes Bild sofort aus? (session.rs)
 //!   Tablet → PC  KEY_REQUEST – Tablet wartet auf ein Schlüsselbild
+//!   PC → Tablet  STILL   [Breite u32][Höhe u32][Format u8][Daten] – verlustfreies Standbild,
+//!                        liegt über dem Video bis zum nächsten Videobild (still.rs)
 //! Audio-Verbindung (Port 27184):
 //!   PC → Tablet  AFMT    JSON {rate,channels}
 //!   PC → Tablet  PCM     16-Bit little-endian, verschachtelt
@@ -55,6 +57,8 @@ pub const T_VOLUME: u8 = 0x16;
 pub const T_DECODER: u8 = 0x17;
 /// Tablet → PC: bitte ein Schlüsselbild (Dekoder neu gestartet oder Bilder verworfen)
 pub const T_KEY_REQUEST: u8 = 0x18;
+/// PC → Tablet: verlustfreies Standbild (siehe still.rs)
+pub const T_STILL: u8 = 0x19;
 
 pub const VF_KEY: u8 = 1;
 pub const VF_CONFIG: u8 = 2;

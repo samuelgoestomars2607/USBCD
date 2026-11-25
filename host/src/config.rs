@@ -24,6 +24,15 @@ pub struct Config {
     pub codec: String,
     /// 0 = automatisch aus Auflösung × Bildrate (Menü „Bildqualität“)
     pub bitrate_mbps: u32,
+    /// Bildqualität „Maximal“: gleichbleibende Qualität statt gleichbleibender Datenrate
+    /// (NVIDIA), sonst die höchste Datenrate – für starke PCs; Vorrang vor bitrate_mbps
+    pub quality_max: bool,
+    /// Vorrang für die Bildübertragung: ffmpeg bekommt beim Grafikchip die Stufe „hoch“ und
+    /// bei der CPU „höher als normal“ (wie bei Game-Streaming-Servern)
+    pub stream_priority: bool,
+    /// Standbilder verlustfrei: steht das Bild still, schickt USBCD ein pixelgenaues Bild
+    /// hinterher (exakte Farben, scharfe farbige Schrift) – für starke PCs
+    pub lossless_stills: bool,
     /// Helligkeit des Tablets in Prozent (Menü „Tablet-Helligkeit“)
     pub tablet_brightness: u32,
     /// 0 = keine Begrenzung (Tablet-Maximum)
@@ -57,6 +66,8 @@ pub struct Config {
     pub display_position: Option<crate::display::Placement>,
     /// Touch und S Pen am Tablet steuern Windows
     pub tablet_input: bool,
+    /// Druckkurve des S Pen: "soft" (weich – wenig Kraft nötig) | "linear" | "hard" (hart)
+    pub pen_pressure: String,
     /// Info-Anzeige (Bilder/s, Datenrate, Laufzeiten) auf dem Tablet
     pub show_stats: bool,
     /// Tablet-Display aus, wenn der PC-Bildschirm ausgeht oder der PC gesperrt wird
@@ -110,6 +121,9 @@ impl Default for Config {
             encoder: "auto".into(),
             codec: "auto".into(),
             bitrate_mbps: 0,
+            quality_max: false,
+            stream_priority: true,
+            lossless_stills: false,
             tablet_brightness: 100,
             max_fps: 0,
             capture_cursor: true,
@@ -137,6 +151,7 @@ impl Default for Config {
             hide_cable_output: true,
             display_position: None,
             tablet_input: true,
+            pen_pressure: "linear".into(),
             show_stats: false,
             follow_pc_power: true,
             webcam: false,
