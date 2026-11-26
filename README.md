@@ -67,6 +67,21 @@ The default sound output is **not** changed. For sound on the tablet, choose "US
 * **USB debugging** gives the connected PC far-reaching access to the tablet. Choose "Always allow" only on your own
   PCs and remove other authorizations under *Developer options → Revoke USB debugging authorizations*.
 
+## Privacy
+
+USBCD collects no data and sends nothing to the publisher or anyone else. There is no telemetry, no advertising and
+no account.
+
+* **Picture, sound, touch, pen and webcam** only travel over the USB cable between PC and tablet (via adb, only on
+  `127.0.0.1` on both sides). None of it goes to the internet, nothing is recorded.
+* **The only internet connection** is the [update check](#updates) on GitHub. Like any website visit, GitHub sees
+  your IP address; GitHub's privacy statement applies to that. To turn it off: menu → *Check for updates
+  automatically*.
+* **Webcam:** only the front camera and only when you turn on *Tablet selfie camera as webcam*. Only the app in which
+  you choose "USBCD Tablet Webcam" gets the pictures.
+* **Settings and log** (`usbcd.toml`, `usbcd.log`, `diagnose.txt`) stay on your PC under `%LOCALAPPDATA%\USBCD`.
+  They only leave it if you pass them on yourself, e.g. in an issue.
+
 ## Setup
 
 ### Tablet (once)
@@ -100,6 +115,7 @@ USBCD runs as an **icon in the notification area** (possibly under ^). Click it 
 | Send sound to tablet | sound transmission on/off |
 | Touch and pen on the tablet | fingers and S Pen operate Windows on the tablet monitor (default: on) |
 | Pen pressure | Soft (little force needed) · Linear (default) · Firm (finer at light pressure) |
+| Pen side button | Right-click (default, also by clicking in the air) · Eraser while held |
 | Info overlay on the tablet | frames/s, data rate, decode time and USB round trip at the top left (default: off) |
 | Turn tablet off and on with the PC screen | when the PC screen turns off or the PC is locked, the tablet display turns off too – and back on (default: on) |
 | Tablet selfie camera as webcam | adds the camera “USBCD Tablet Webcam” to Windows (default: off) – see below |
@@ -113,6 +129,7 @@ USBCD runs as an **icon in the notification area** (possibly under ^). Click it 
 | Start automatically at sign-in | autostart on/off |
 | Install update … | appears as soon as a new version is out – see [Updates](#updates) |
 | Check for updates automatically | checks GitHub shortly after start and then daily (default: on) |
+| About USBCD … | version, license and warranty disclaimer; opens the license texts if you like |
 | Quit USBCD | |
 
 **Behaviour:**
@@ -131,15 +148,23 @@ USBCD runs as an **icon in the notification area** (possibly under ^). Click it 
 * Problems (USB debugging not allowed, app missing, transmission errors) are reported by Windows with the next step.
 * The tablet's volume is not changed.
 
+<p align="center">
+  <img src="docs/usbcd-pen.gif" width="100%" alt="The S Pen on the tablet: pressure-sensitive line, side button click opens the right-click menu, eraser while the button is held">
+</p>
+
 **Touch and S Pen:** the pen arrives in Windows as a real pen – with pressure, hover (the cursor follows the pen
-without clicking), side button (= right-click) and, if the pen reports it, tilt. This works in every program that uses
+without clicking), side button and, if the pen reports it, tilt. This works in every program that uses
 Windows pen input ("Windows Ink"), e.g. Affinity, Krita, Photoshop, OneNote, browsers. Fingers tap, drag and scroll
 like on a touch screen. If your palm rests on the screen while drawing, fingers are ignored until shortly after the
 pen is lifted.
 * Programs that only know the old WinTab driver get no pressure (that would need a driver).
 * For security reasons Windows does not let touch/pen operate windows running with administrator rights (e.g. UAC).
-* Samsung opens "Air Command" when the S Pen button is pressed while hovering. If you want the button as right-click,
-  turn that off under *Settings → Advanced features → S Pen → Air Command*.
+* What the side button does is set under *Pen side button*:
+  * **Right-click** (default): hold the button and tap, as usual in Windows, or simply click it while the pen hovers.
+  * **Eraser while held**: the pen erases while the button is held, like the eraser end of a Surface Pen. It switches
+    while hovering, never in the middle of a stroke.
+* Samsung opens "Air Command" when the S Pen button is pressed while hovering. If the button should only act in
+  Windows, turn that off under *Settings → Advanced features → S Pen → Air Command*.
 
 **Webcam:** with *Tablet selfie camera as webcam*, Windows 11 gets the camera “USBCD Tablet Webcam”. You pick it
 yourself in each app (Teams, Discord, Zoom, browser, Windows Camera app) – USBCD never makes it the default camera and
@@ -192,6 +217,7 @@ the notification was skipped.
 | `display_position` | – | remembered automatically when you move the tablet monitor in the Windows display settings; delete the line = back to "right of the main screen" |
 | `tablet_input` | `true` | touch and S Pen control Windows (also in the menu) |
 | `pen_pressure` | `"linear"` | pressure curve of the S Pen: `soft` / `linear` / `hard` (also in the menu) |
+| `pen_button` | `"right_click"` | S Pen side button: `right_click` / `eraser` (also in the menu) |
 | `show_stats` | `false` | info overlay on the tablet (also in the menu) |
 | `follow_pc_power` | `true` | tablet display off/on together with the PC screen (also in the menu) |
 | `webcam` | `false` | tablet front camera as a webcam (also in the menu) |
@@ -325,8 +351,9 @@ Pull requests are welcome; all visible text exists in German and English.
 ## License
 
 Copyright © 2026 Samuel E. Ramirez. USBCD is free software under the
-[GNU General Public License v3.0 or later](LICENSE). Third-party components (FFmpeg, adb, Virtual Display Driver,
-Space Grotesk, VB-CABLE) and their licenses: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
+[GNU General Public License v3.0 or later](LICENSE) and comes with no warranty, to the extent permitted by law. You
+don't have to accept the license to use USBCD. Third-party components (FFmpeg, adb, Virtual Display Driver,
+Space Grotesk, VB-CABLE, Rust libraries) and their licenses: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
 
 Samsung, Galaxy, Android, Windows and other names mentioned are trademarks of their respective owners. USBCD is an
 independent project and is not affiliated with these companies.

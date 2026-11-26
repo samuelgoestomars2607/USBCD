@@ -55,6 +55,9 @@ class InputForwarder(private val send: (Int, ByteArray) -> Boolean) {
 
     // --- Stift ---
 
+    /** Stift liegt gerade auf (für Tastendrücke, die ohne Bewegung kommen). */
+    private var penContact = false
+
     private fun pen(ev: MotionEvent, i: Int, w: Int, h: Int) {
         val (inRange, contact) = when (ev.actionMasked) {
             MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> true to false
@@ -62,8 +65,11 @@ class InputForwarder(private val send: (Int, ByteArray) -> Boolean) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_POINTER_DOWN -> true to true
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> true to false
             MotionEvent.ACTION_CANCEL -> false to false
+            // Seitentaste gedrückt/losgelassen: sofort melden, nicht erst bei der nächsten Bewegung
+            MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE -> true to penContact
             else -> return
         }
+        penContact = contact
         var flags = 0
         if (inRange) flags = flags or 1
         if (contact) flags = flags or 2

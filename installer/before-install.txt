@@ -42,3 +42,20 @@ SECURITY
 • USB debugging gives the connected PC far-reaching access to the tablet. Only choose
   "Always allow" on your own PCs and remove other authorizations under
   Developer options → "Revoke USB debugging authorizations".
+
+
+PRIVACY
+
+• USBCD collects no data: no telemetry, no advertising, no account.
+• Picture, sound, touch, pen and webcam only travel over the USB cable and stay on PC and tablet.
+• The only internet connection is the update check on GitHub (can be turned off in the menu).
+  Like any website visit, GitHub sees your IP address.
+
+
+LICENSE
+
+• Copyright © 2026 Samuel E. Ramirez. USBCD is free software under the GNU General Public
+  License v3.0 or later: you may use, share and change it. You don't have to accept anything.
+• USBCD comes with no warranty, to the extent permitted by law.
+• The license texts (including those of the bundled components) are installed as LICENSE.txt
+  and THIRD-PARTY.txt in the program folder and can be opened from the menu under "About USBCD".

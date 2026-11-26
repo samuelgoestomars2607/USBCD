@@ -711,9 +711,10 @@ impl InputReader {
                                 pen.pressure =
                                     crate::input::pressure_curve(pen.pressure, &c.pen_pressure);
                             }
-                            injector
-                                .get_or_insert_with(|| crate::input::Injector::new(vd.clone()))
-                                .handle(ev);
+                            let inj = injector
+                                .get_or_insert_with(|| crate::input::Injector::new(vd.clone()));
+                            inj.set_button_mode(crate::input::ButtonMode::from_config(&c.pen_button));
+                            inj.handle(ev);
                         }
                     }
                     crate::proto::T_PONG => video::on_pong(&p),

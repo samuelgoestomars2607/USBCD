@@ -69,6 +69,21 @@ Der Standard-Ausgang für Ton wird **nicht** umgestellt. Für Ton übers Tablet 
   „Immer zulassen“ wählen; fremde Freigaben unter *Entwickleroptionen → USB-Debugging-Autorisierungen aufheben*
   löschen.
 
+## Datenschutz
+
+USBCD sammelt keine Daten und schickt nichts an den Herausgeber oder an Dritte. Es gibt keine Telemetrie, keine Werbung und kein
+Konto.
+
+* **Bild, Ton, Touch, Stift und Webcam** laufen nur über das USB-Kabel zwischen PC und Tablet (über adb, auf beiden
+  Seiten nur an `127.0.0.1`). Nichts davon geht ins Internet, nichts wird aufgezeichnet.
+* **Einzige Verbindung ins Internet** ist die [Update-Prüfung](#updates) bei GitHub. GitHub sieht dabei wie bei
+  jedem Webseitenaufruf deine IP-Adresse; dafür gilt die Datenschutzerklärung von GitHub. Ausschalten: Menü →
+  *Automatisch nach Updates suchen*.
+* **Webcam:** nur die Frontkamera und nur, wenn du *Selfie-Kamera des Tablets als Webcam* einschaltest. Die Bilder
+  bekommt nur die App, in der du „USBCD Tablet Webcam“ auswählst.
+* **Einstellungen und Log** (`usbcd.toml`, `usbcd.log`, `diagnose.txt`) liegen nur auf deinem PC unter
+  `%LOCALAPPDATA%\USBCD`. Sie verlassen ihn nur, wenn du sie selbst weitergibst, z. B. in einem Issue.
+
 ## Einrichtung
 
 ### Tablet (einmalig)
@@ -102,6 +117,7 @@ USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick 
 | Ton zum Tablet übertragen | Ton-Übertragung ein/aus |
 | Touch und Stift am Tablet | Finger und S Pen bedienen Windows auf dem Tablet-Monitor (Standard: an) |
 | Stiftdruck | Weich (wenig Kraft nötig) · Linear (Standard) · Hart (feiner bei leichtem Druck) |
+| Seitentaste des Stifts | Rechtsklick (Standard, auch per Klick in der Luft) · Radierer, solange gedrückt |
 | Info-Anzeige auf dem Tablet | Bilder/s, Datenrate, Dekodierzeit und USB-Laufzeit oben links (Standard: aus) |
 | Tablet mit dem PC-Bildschirm aus- und einschalten | Geht der PC-Bildschirm aus oder wird der PC gesperrt, geht auch das Tablet-Display aus – und wieder an (Standard: an) |
 | Selfie-Kamera des Tablets als Webcam | legt in Windows die Kamera „USBCD Tablet Webcam“ an (Standard: aus) – siehe unten |
@@ -115,6 +131,7 @@ USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick 
 | Beim Anmelden automatisch starten | Autostart ein/aus |
 | Update auf … installieren | erscheint, sobald es eine neue Version gibt – siehe [Updates](#updates) |
 | Automatisch nach Updates suchen | sieht kurz nach dem Start und danach täglich bei GitHub nach (Standard: an) |
+| Über USBCD … | Version, Lizenz und Gewährleistungsausschluss; öffnet auf Wunsch die Lizenztexte |
 | USBCD beenden | |
 
 **Verhalten:**
@@ -134,16 +151,25 @@ USBCD läuft als **Symbol im Infobereich der Taskleiste** (ggf. unter ^). Klick 
 * Probleme (USB-Debugging nicht erlaubt, App fehlt, Übertragungsfehler) meldet Windows mit dem nächsten Schritt.
 * Die Lautstärke des Tablets wird nicht verändert.
 
+<p align="center">
+  <img src="docs/usbcd-pen.gif" width="100%" alt="Der S Pen auf dem Tablet: Linie mit Druckstufen, Klick auf die Seitentaste öffnet das Rechtsklick-Menü, Radierer bei gehaltener Taste">
+</p>
+
 **Touch und S Pen:** Der Stift kommt in Windows als echter Stift an – mit Druckstufen, Schweben (der Mauszeiger
-folgt dem Stift, ohne zu klicken), Seitentaste (= Rechtsklick) und, falls der Stift sie meldet, Neigung. Das gilt für
+folgt dem Stift, ohne zu klicken), Seitentaste und, falls der Stift sie meldet, Neigung. Das gilt für
 alle Programme, die Windows-Stifteingabe („Windows Ink“) nutzen, z. B. Affinity, Krita, Photoshop, OneNote, Browser.
 Finger tippen, ziehen und scrollen wie auf einem Touch-Bildschirm. Liegt beim Zeichnen der Handballen auf, werden
 Finger bis kurz nach dem Absetzen des Stifts ignoriert.
 * Programme, die nur den alten WinTab-Treiber kennen, bekommen keinen Druck (dafür bräuchte es einen Treiber).
 * Fenster, die mit Administratorrechten laufen, lassen sich von Windows aus Sicherheitsgründen nicht per Touch/Stift
   bedienen (z. B. Benutzerkontensteuerung).
-* Samsung öffnet beim Drücken der S-Pen-Taste im Schweben „Air Command“. Wer die Taste als Rechtsklick will, schaltet
-  das unter *Einstellungen → Erweiterte Funktionen → S Pen → Air Command* ab.
+* Was die Seitentaste macht, stellst du unter *Seitentaste des Stifts* ein:
+  * **Rechtsklick** (Standard): Taste halten und tippen, wie unter Windows üblich, oder einfach klicken, während der
+    Stift schwebt.
+  * **Radierer, solange gedrückt**: Mit gehaltener Taste radiert der Stift, wie das Radierer-Ende am Surface Pen.
+    Umgeschaltet wird beim Schweben, nie mitten im Strich.
+* Samsung öffnet beim Drücken der S-Pen-Taste im Schweben „Air Command“. Soll die Taste nur in Windows wirken,
+  schaltest du das unter *Einstellungen → Erweiterte Funktionen → S Pen → Air Command* ab.
 
 **Webcam:** Mit *Selfie-Kamera des Tablets als Webcam* erscheint in Windows 11 die Kamera „USBCD Tablet Webcam“.
 Du wählst sie in der jeweiligen App selbst aus (Teams, Discord, Zoom, Browser, Windows-Kamera-App) – USBCD macht sie
@@ -197,6 +223,7 @@ steht dann **Update auf … installieren** – auch wenn die Benachrichtigung ü
 | `display_position` | – | Wird automatisch gemerkt, wenn du den Tablet-Monitor in den Windows-Anzeigeeinstellungen verschiebst; Zeile löschen = wieder „rechts neben dem Hauptbildschirm“ |
 | `tablet_input` | `true` | Touch und S Pen steuern Windows (auch im Menü) |
 | `pen_pressure` | `"linear"` | Druckkurve des S Pen: `soft` / `linear` / `hard` (auch im Menü) |
+| `pen_button` | `"right_click"` | Seitentaste des S Pen: `right_click` / `eraser` (auch im Menü) |
 | `show_stats` | `false` | Info-Anzeige auf dem Tablet (auch im Menü) |
 | `follow_pc_power` | `true` | Tablet-Display mit dem PC-Bildschirm aus/an (auch im Menü) |
 | `webcam` | `false` | Selfie-Kamera des Tablets als Webcam (auch im Menü) |
@@ -331,8 +358,9 @@ Pull Requests sind willkommen; alle sichtbaren Texte gibt es auf Deutsch und Eng
 ## Lizenz
 
 Copyright © 2026 Samuel E. Ramirez. USBCD ist freie Software unter der
-[GNU General Public License v3.0 oder später](LICENSE). Fremdkomponenten (FFmpeg, adb, Virtual Display Driver,
-Space Grotesk, VB-CABLE) und ihre Lizenzen: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
+[GNU General Public License v3.0 oder später](LICENSE) und wird ohne jede Gewährleistung bereitgestellt, soweit das
+Gesetz es zulässt. Zustimmen musst du der Lizenz nicht, um USBCD zu benutzen. Fremdkomponenten (FFmpeg, adb, Virtual Display Driver,
+Space Grotesk, VB-CABLE, Rust-Bibliotheken) und ihre Lizenzen: [installer/THIRD-PARTY.txt](installer/THIRD-PARTY.txt).
 
 Samsung, Galaxy, Android, Windows und weitere genannte Namen sind Marken ihrer Inhaber. USBCD ist ein unabhängiges
 Projekt und steht in keiner Verbindung zu diesen Unternehmen.

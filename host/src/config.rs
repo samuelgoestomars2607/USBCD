@@ -68,6 +68,9 @@ pub struct Config {
     pub tablet_input: bool,
     /// Druckkurve des S Pen: "soft" (weich – wenig Kraft nötig) | "linear" | "hard" (hart)
     pub pen_pressure: String,
+    /// Seitentaste des S Pen: "right_click" (Rechtsklick, auch per Klick in der Luft) |
+    /// "eraser" (Radierer, solange gedrückt)
+    pub pen_button: String,
     /// Info-Anzeige (Bilder/s, Datenrate, Laufzeiten) auf dem Tablet
     pub show_stats: bool,
     /// Tablet-Display aus, wenn der PC-Bildschirm ausgeht oder der PC gesperrt wird
@@ -152,6 +155,7 @@ impl Default for Config {
             display_position: None,
             tablet_input: true,
             pen_pressure: "linear".into(),
+            pen_button: "right_click".into(),
             show_stats: false,
             follow_pc_power: true,
             webcam: false,

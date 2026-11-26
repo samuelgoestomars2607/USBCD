@@ -66,6 +66,96 @@ pub fn pressure_curve(p: u16, curve: &str) -> u16 {
     ((x * 1024.0).round() as u16).clamp(1, 1024)
 }
 
+/// Was die Seitentaste des S Pen macht (Menü „Seitentaste des Stifts“).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ButtonMode {
+    /// Wie unter Windows üblich: Taste halten und tippen = Rechtsklick. Zusätzlich gibt ein
+    /// Klick, während der Stift nur schwebt, einen Rechtsklick an dieser Stelle.
+    #[default]
+    RightClick,
+    /// Solange die Taste gedrückt ist, ist der Stift ein Radierer (wie das Radierer-Ende
+    /// am Surface Pen).
+    Eraser,
+}
+
+impl ButtonMode {
+    pub fn from_config(s: &str) -> Self {
+        match s {
+            "eraser" => ButtonMode::Eraser,
+            _ => ButtonMode::RightClick,
+        }
+    }
+}
+
+/// Was ein Stift-Ereignis nach der Seitentaste bewirkt.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Shaped {
+    /// das, was Windows als Stift sieht
+    pub pen: Pen,
+    /// vorher einen Rechtsklick (Tippen mit Seitentaste) an der alten Stelle
+    pub right_tap: bool,
+    /// Radierer an/aus beim Schweben: Windows erwartet dafür, dass der Stift kurz die
+    /// Reichweite verlässt (wie beim Umdrehen eines echten Stifts)
+    pub reenter: bool,
+}
+
+/// Merkt sich den Zustand der Seitentaste über die Ereignisse hinweg.
+#[derive(Default)]
+pub struct PenButton {
+    mode: ButtonMode,
+    pressed: bool,
+    /// während des Drückens berührt: kein Klick in der Luft
+    touched: bool,
+}
+
+impl PenButton {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_mode(&mut self, m: ButtonMode) {
+        if m != self.mode {
+            self.mode = m;
+            self.pressed = false;
+            self.touched = false;
+        }
+    }
+
+    /// `prev`: was Windows zuletzt gesehen hat, `cur`: was das Tablet gerade meldet.
+    pub fn shape(&mut self, prev: &Pen, cur: Pen) -> Shaped {
+        let pressed = cur.barrel && cur.in_range;
+        let press = pressed && !self.pressed;
+        let release = !pressed && self.pressed;
+        if press {
+            self.touched = cur.contact;
+        } else if pressed && cur.contact {
+            self.touched = true;
+        }
+        self.pressed = pressed;
+        let mut out = Shaped {
+            pen: cur,
+            ..Default::default()
+        };
+        match self.mode {
+            ButtonMode::RightClick => {
+                out.right_tap = release && !self.touched && cur.in_range && !cur.contact;
+            }
+            ButtonMode::Eraser => {
+                out.pen.barrel = false;
+                let want = cur.eraser || cur.barrel;
+                if prev.contact {
+                    // nie mitten im Strich (oder beim Abheben) umschalten
+                    out.pen.eraser = prev.eraser;
+                } else {
+                    out.pen.eraser = want;
+                    out.reenter = prev.in_range && !prev.contact && prev.eraser != want;
+                }
+            }
+        }
+        out
+    }
+}
+
 fn u16_at(b: &[u8], i: usize) -> u16 {
     u16::from_be_bytes([b[i], b[i + 1]])
 }
@@ -168,6 +258,7 @@ pub struct Injector {
     area: Option<Placement>,
     area_at: Instant,
     pen: Pen,
+    button: PenButton,
     pen_seen: Option<Instant>,
     touches: Vec<Touch>,
     errors: u32,
@@ -196,6 +287,7 @@ impl Injector {
             area: None,
             area_at: Instant::now() - Duration::from_secs(10),
             pen: Pen::default(),
+            button: PenButton::new(),
             pen_seen: None,
             touches: Vec::new(),
             errors: 0,
@@ -255,47 +347,79 @@ impl Injector {
         }
     }
 
-    fn pen(&mut self, cur: Pen) {
+    pub fn set_button_mode(&mut self, m: ButtonMode) {
+        self.button.set_mode(m);
+    }
+
+    fn pen_info(flags: u32, cur: &Pen, pt: POINT) -> POINTER_TYPE_INFO {
+        let mut pen_flags = 0;
+        if cur.barrel {
+            pen_flags |= PEN_FLAG_BARREL;
+        }
+        if cur.eraser {
+            pen_flags |= PEN_FLAG_INVERTED;
+            if flags & POINTER_FLAG_INCONTACT != 0 {
+                pen_flags |= PEN_FLAG_ERASER;
+            }
+        }
+        let mut pi: POINTER_TYPE_INFO = unsafe { std::mem::zeroed() };
+        pi.r#type = PT_PEN;
+        let p = unsafe { &mut pi.Anonymous.penInfo };
+        p.pointerInfo.pointerType = PT_PEN;
+        p.pointerInfo.pointerId = 0;
+        p.pointerInfo.pointerFlags = flags;
+        p.pointerInfo.ptPixelLocation = pt;
+        p.pointerInfo.historyCount = 1;
+        p.penFlags = pen_flags;
+        p.penMask = PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
+        p.pressure = if flags & POINTER_FLAG_INCONTACT != 0 {
+            (cur.pressure as u32).max(1)
+        } else {
+            0
+        };
+        p.tiltX = cur.tilt_x as i32;
+        p.tiltY = cur.tilt_y as i32;
+        pi
+    }
+
+    fn pen(&mut self, raw: Pen) {
         let Some(a) = self.area() else { return };
         // Stift kommt: liegende Finger (meist der Handballen) abbrechen
-        if cur.in_range && !self.touches.is_empty() {
+        if raw.in_range && !self.touches.is_empty() {
             self.cancel_touches();
         }
-        if cur.in_range || cur.contact {
+        if raw.in_range || raw.contact {
             self.pen_seen = Some(Instant::now());
         }
-        let prev = self.pen;
-        let pt = map(cur.x, cur.y, &a);
+        let mut prev = self.pen;
+        let shaped = self.button.shape(&prev, raw);
+        let cur = shaped.pen;
         let mut infos = Vec::new();
-        for flags in pen_steps(&prev, &cur) {
-            let mut pen_flags = 0;
-            if cur.barrel {
-                pen_flags |= PEN_FLAG_BARREL;
-            }
-            if cur.eraser {
-                pen_flags |= PEN_FLAG_INVERTED;
-                if flags & POINTER_FLAG_INCONTACT != 0 {
-                    pen_flags |= PEN_FLAG_ERASER;
-                }
-            }
-            let mut pi: POINTER_TYPE_INFO = unsafe { std::mem::zeroed() };
-            pi.r#type = PT_PEN;
-            let p = unsafe { &mut pi.Anonymous.penInfo };
-            p.pointerInfo.pointerType = PT_PEN;
-            p.pointerInfo.pointerId = 0;
-            p.pointerInfo.pointerFlags = flags;
-            p.pointerInfo.ptPixelLocation = pt;
-            p.pointerInfo.historyCount = 1;
-            p.penFlags = pen_flags;
-            p.penMask = PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
-            p.pressure = if flags & POINTER_FLAG_INCONTACT != 0 {
-                (cur.pressure as u32).max(1)
-            } else {
-                0
+        if shaped.right_tap {
+            // Klick in der Luft: an der Stelle mit gedrückter Seitentaste kurz tippen –
+            // genau das, was Windows sonst als Rechtsklick vom Stift kennt
+            let at = map(prev.x, prev.y, &a);
+            let tap = Pen {
+                barrel: true,
+                pressure: 512,
+                ..prev
             };
-            p.tiltX = cur.tilt_x as i32;
-            p.tiltY = cur.tilt_y as i32;
-            infos.push(pi);
+            let r = POINTER_FLAG_INRANGE;
+            infos.push(Self::pen_info(
+                r | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN,
+                &tap,
+                at,
+            ));
+            infos.push(Self::pen_info(r | POINTER_FLAG_UP, &tap, at));
+        }
+        if shaped.reenter {
+            let at = map(prev.x, prev.y, &a);
+            infos.push(Self::pen_info(POINTER_FLAG_UPDATE, &prev, at));
+            prev.in_range = false;
+        }
+        let pt = map(cur.x, cur.y, &a);
+        for flags in pen_steps(&prev, &cur) {
+            infos.push(Self::pen_info(flags, &cur, pt));
         }
         // jeder Schritt einzeln (ein Stift = ein Zeiger pro Aufruf)
         let dev = self.pen_dev;
@@ -414,6 +538,79 @@ impl Drop for Injector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hover(barrel: bool) -> Pen {
+        Pen {
+            in_range: true,
+            barrel,
+            x: 100,
+            y: 200,
+            ..Default::default()
+        }
+    }
+
+    fn touching(barrel: bool) -> Pen {
+        Pen {
+            contact: true,
+            pressure: 300,
+            ..hover(barrel)
+        }
+    }
+
+    #[test]
+    fn side_button_right_click_in_the_air() {
+        let mut b = PenButton::new();
+        let mut seen = Pen::default();
+        let mut feed = |b: &mut PenButton, p: Pen| {
+            let s = b.shape(&seen, p);
+            seen = s.pen;
+            s
+        };
+        assert!(!feed(&mut b, hover(false)).right_tap);
+        let s = feed(&mut b, hover(true));
+        assert!(!s.right_tap && s.pen.barrel, "Taste geht weiter an Windows");
+        assert!(feed(&mut b, hover(false)).right_tap, "Klick in der Luft");
+        // halten und tippen: Windows macht den Rechtsklick selbst, kein zweiter
+        feed(&mut b, hover(true));
+        feed(&mut b, touching(true));
+        feed(&mut b, hover(true));
+        assert!(!feed(&mut b, hover(false)).right_tap);
+        // Stift mit gedrückter Taste aus der Reichweite gezogen: nichts
+        feed(&mut b, hover(true));
+        assert!(!feed(&mut b, Pen::default()).right_tap);
+    }
+
+    #[test]
+    fn side_button_as_eraser() {
+        let mut b = PenButton::new();
+        b.set_mode(ButtonMode::Eraser);
+        let mut seen = Pen::default();
+        let mut feed = |b: &mut PenButton, p: Pen| {
+            let s = b.shape(&seen, p);
+            seen = s.pen;
+            s
+        };
+        let s = feed(&mut b, hover(false));
+        assert!(!s.pen.eraser && !s.reenter);
+        let s = feed(&mut b, hover(true));
+        assert!(
+            s.pen.eraser && !s.pen.barrel && s.reenter,
+            "beim Schweben umschalten"
+        );
+        let s = feed(&mut b, touching(true));
+        assert!(s.pen.eraser && !s.reenter);
+        // Taste mitten im Strich losgelassen: Strich bleibt Radierer, auch beim Abheben
+        let s = feed(&mut b, touching(false));
+        assert!(s.pen.eraser && !s.reenter);
+        let s = feed(&mut b, hover(false));
+        assert!(s.pen.eraser && !s.reenter);
+        let s = feed(&mut b, hover(false));
+        assert!(!s.pen.eraser && s.reenter, "danach beim Schweben zurück");
+        // Taste mitten im Strich gedrückt: Strich bleibt Stift
+        feed(&mut b, touching(false));
+        let s = feed(&mut b, touching(true));
+        assert!(!s.pen.eraser && !s.pen.barrel);
+    }
 
     #[test]
     fn parses_pen_and_touch() {

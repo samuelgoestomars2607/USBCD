@@ -42,3 +42,21 @@ SICHERHEIT
 • USB-Debugging erlaubt dem verbundenen PC weitreichenden Zugriff auf das Tablet.
   Am besten nur an eigenen PCs „Immer zulassen“ wählen und fremde Freigaben unter
   Entwickleroptionen → „USB-Debugging-Autorisierungen aufheben“ löschen.
+
+
+DATENSCHUTZ
+
+• USBCD sammelt keine Daten: keine Telemetrie, keine Werbung, kein Konto.
+• Bild, Ton, Touch, Stift und Webcam laufen nur über das USB-Kabel und bleiben auf PC und Tablet.
+• Einzige Verbindung ins Internet ist die Update-Prüfung bei GitHub (im Menü abschaltbar).
+  GitHub sieht dabei wie bei jedem Webseitenaufruf deine IP-Adresse.
+
+
+LIZENZ
+
+• Copyright © 2026 Samuel E. Ramirez. USBCD ist freie Software unter der GNU General Public
+  License v3.0 oder später: Du darfst es benutzen, weitergeben und verändern. Zustimmen musst
+  du dafür nichts.
+• USBCD wird ohne jede Gewährleistung bereitgestellt, soweit das Gesetz es zulässt.
+• Die Lizenztexte (auch der mitgelieferten Komponenten) liegen nach der Installation als
+  LICENSE.txt und THIRD-PARTY.txt im Programmordner und sind im Menü unter „Über USBCD“ erreichbar.

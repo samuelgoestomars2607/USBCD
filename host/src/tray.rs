@@ -23,6 +23,7 @@ const ID_DISPLAY: usize = 3;
 const ID_FOLDER: usize = 4;
 const ID_QUIT: usize = 5;
 const ID_LAUNCH: usize = 6;
+const ID_ABOUT: usize = 7;
 
 static HWND_G: AtomicUsize = AtomicUsize::new(0);
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
@@ -103,6 +104,61 @@ unsafe fn balloon(hwnd: HWND, title: &str, text: &str) {
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 
+/// Version, Copyright, Lizenz und Gewährleistungsausschluss (GPL: „Appropriate Legal
+/// Notices“). Eigener Thread, damit das Fenster das Tray-Menü nicht aufhält; mehrfaches
+/// Öffnen holt nur das vorhandene nach vorn.
+fn show_about() {
+    use std::sync::atomic::AtomicBool;
+    static OPEN: AtomicBool = AtomicBool::new(false);
+    if OPEN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let text = format!(
+            "USBCD {}\nCopyright © 2026 Samuel E. Ramirez\n\n{}\n\n{}\n\n{}\ngithub.com/samuelgoestomars2607/USBCD\n\n{}",
+            env!("CARGO_PKG_VERSION"),
+            tr(
+                "USBCD ist freie Software unter der GNU General Public License v3.0 oder später. \
+                 Du darfst es benutzen, weitergeben und verändern.",
+                "USBCD is free software under the GNU General Public License v3.0 or later. \
+                 You may use, share and change it.",
+            ),
+            tr(
+                "USBCD wird ohne jede Gewährleistung bereitgestellt, soweit das Gesetz es zulässt.",
+                "USBCD comes with no warranty, to the extent permitted by law.",
+            ),
+            tr("Quellcode:", "Source code:"),
+            tr(
+                "Lizenztexte (auch der mitgelieferten Komponenten) jetzt öffnen?",
+                "Open the license texts (including the bundled components) now?",
+            ),
+        );
+        let (t, c) = (wide(&text), wide(tr("Über USBCD", "About USBCD")));
+        let r = unsafe {
+            MessageBoxW(
+                null_mut(),
+                t.as_ptr(),
+                c.as_ptr(),
+                MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND,
+            )
+        };
+        if r == IDYES {
+            if let Some(dir) = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(|d| d.to_path_buf()))
+            {
+                for f in ["LICENSE.txt", "THIRD-PARTY.txt"] {
+                    let p = dir.join(f);
+                    if p.exists() {
+                        open(&p.to_string_lossy());
+                    }
+                }
+            }
+        }
+        OPEN.store(false, Ordering::SeqCst);
+    });
+}
+
 fn open(target: &str) {
     let op = wide("open");
     let t = wide(target);
@@ -127,6 +183,8 @@ const ID_Q_MAX: usize = 23;
 const ID_STILLS: usize = 24;
 const ID_PEN_BASE: usize = 60; // 60..=62 → weich/linear/hart
 const PEN_CURVES: [&str; 3] = ["soft", "linear", "hard"];
+const ID_PENBTN_BASE: usize = 64; // 64..=65 → Rechtsklick/Radierer
+const PEN_BUTTONS: [&str; 2] = ["right_click", "eraser"];
 const ID_B_BASE: usize = 30; // 30..=33 → 100/75/50/25 %
 const BRIGHTNESS: [u32; 4] = [100, 75, 50, 25];
 const ID_AUTOSTART: usize = 40;
@@ -242,6 +300,26 @@ unsafe fn show_menu(hwnd: HWND) {
         append(pen, check(cfg.pen_pressure == *curve), ID_PEN_BASE + i, label);
     }
 
+    let pen_btn = CreatePopupMenu();
+    for (i, (mode, label)) in PEN_BUTTONS
+        .iter()
+        .zip([
+            tr(
+                "Rechtsklick (Standard, auch per Klick in der Luft)",
+                "Right-click (default, also by clicking in the air)",
+            ),
+            tr("Radierer, solange gedrückt", "Eraser while held"),
+        ])
+        .enumerate()
+    {
+        append(
+            pen_btn,
+            check(cfg.pen_button == *mode),
+            ID_PENBTN_BASE + i,
+            label,
+        );
+    }
+
     let bright = CreatePopupMenu();
     for (i, b) in BRIGHTNESS.iter().enumerate() {
         append(
@@ -344,6 +422,12 @@ unsafe fn show_menu(hwnd: HWND) {
         MF_STRING | MF_POPUP,
         pen as usize,
         tr("Stiftdruck", "Pen pressure"),
+    );
+    append(
+        m,
+        MF_STRING | MF_POPUP,
+        pen_btn as usize,
+        tr("Seitentaste des Stifts", "Pen side button"),
     );
     append(
         m,
@@ -459,8 +543,10 @@ unsafe fn show_menu(hwnd: HWND) {
         ),
     );
     append(m, MF_SEPARATOR, 0, "");
+    append(m, MF_STRING, ID_ABOUT, tr("Über USBCD …", "About USBCD …"));
     append(m, MF_STRING, ID_QUIT, tr("USBCD beenden", "Quit USBCD"));
 
+    apply_menu_theme(hwnd);
     SetForegroundWindow(hwnd);
     TrackPopupMenu(
         m,
@@ -473,6 +559,60 @@ unsafe fn show_menu(hwnd: HWND) {
     );
     PostMessageW(hwnd, WM_NULL, 0, 0);
     DestroyMenu(m); // zerstört auch die Untermenüs
+}
+
+/// Menü hell oder dunkel – passend zur Taskleiste (Einstellungen → Personalisierung → Farben →
+/// „Windows-Standardmodus“). Klassische Windows-Menüs folgen dem nicht von selbst; Windows
+/// bietet dafür nur nicht dokumentierte Funktionen in uxtheme.dll, die Explorer und viele
+/// Taskleisten-Programme genauso nutzen. Fehlen sie, bleibt das Menü hell wie bisher.
+/// Wird vor jedem Öffnen aufgerufen, damit ein Wechsel des Modus sofort wirkt.
+unsafe fn apply_menu_theme(hwnd: HWND) {
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    // Reihenfolge-Nummern in uxtheme.dll (seit Windows 10 1903 unverändert)
+    const ALLOW_DARK_MODE_FOR_WINDOW: usize = 133;
+    const SET_PREFERRED_APP_MODE: usize = 135;
+    const FLUSH_MENU_THEMES: usize = 136;
+    const FORCE_DARK: i32 = 2;
+    const FORCE_LIGHT: i32 = 3;
+    let lib = LoadLibraryW(wide("uxtheme.dll").as_ptr());
+    if lib.is_null() {
+        return;
+    }
+    let (Some(allow), Some(mode), Some(flush)) = (
+        GetProcAddress(lib, ALLOW_DARK_MODE_FOR_WINDOW as *const u8),
+        GetProcAddress(lib, SET_PREFERRED_APP_MODE as *const u8),
+        GetProcAddress(lib, FLUSH_MENU_THEMES as *const u8),
+    ) else {
+        return;
+    };
+    let allow: unsafe extern "system" fn(HWND, BOOL) -> BOOL = std::mem::transmute(allow);
+    let mode: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(mode);
+    let flush: unsafe extern "system" fn() = std::mem::transmute(flush);
+    let dark = system_uses_dark();
+    allow(hwnd, dark as BOOL);
+    mode(if dark { FORCE_DARK } else { FORCE_LIGHT });
+    flush();
+}
+
+/// Nutzt die Taskleiste den dunklen Modus? (fehlt der Eintrag: hell)
+fn system_uses_dark() -> bool {
+    use windows_sys::Win32::System::Registry::*;
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let val = wide("SystemUsesLightTheme");
+    let mut v = 1u32;
+    let mut len = 4u32;
+    unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            val.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            &mut v as *mut u32 as *mut std::ffi::c_void,
+            &mut len,
+        ) == 0
+            && v == 0
+    }
 }
 
 /// Menüauswahl für Einstellungen; liefert true, wenn behandelt.
@@ -507,6 +647,10 @@ fn handle_setting(id: usize) -> bool {
         i if (ID_PEN_BASE..ID_PEN_BASE + PEN_CURVES.len()).contains(&i) => {
             let curve = PEN_CURVES[i - ID_PEN_BASE];
             update(|c| c.pen_pressure = curve.into());
+        }
+        i if (ID_PENBTN_BASE..ID_PENBTN_BASE + PEN_BUTTONS.len()).contains(&i) => {
+            let mode = PEN_BUTTONS[i - ID_PENBTN_BASE];
+            update(|c| c.pen_button = mode.into());
         }
         i if (ID_B_BASE..ID_B_BASE + BRIGHTNESS.len()).contains(&i) => {
             let b = BRIGHTNESS[i - ID_B_BASE];
@@ -635,6 +779,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 ID_SOUND => open("ms-settings:sound"),
                 ID_DISPLAY => open("ms-settings:display"),
                 ID_FOLDER => open(&crate::config::data_dir().to_string_lossy()),
+                ID_ABOUT => show_about(),
                 ID_QUIT => {
                     set_shutdown();
                     DestroyWindow(hwnd);
