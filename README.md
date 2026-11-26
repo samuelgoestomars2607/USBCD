@@ -72,6 +72,8 @@ The default sound output is **not** changed. For sound on the tablet, choose "US
 ### Tablet (once)
 1. Settings → About tablet → Software information → tap *Build number* 7 times.
 2. Developer options → turn on **USB debugging**.
+3. Samsung with One UI 6 or newer: turn off **Auto Blocker** (Settings > Security and privacy > Auto Blocker).
+   While it is on, the tablet blocks commands over USB, so USBCD cannot install or start its app.
 
 ### Install
 1. Download the latest **`USBCD-Setup-<version>.exe`** from [Releases](../../releases/latest) and run it.
@@ -253,6 +255,8 @@ important details in `diagnose.txt`. The service and the setup log to `C:\Progra
   (intentionally disabled while no tablet is connected).
 * **No sound:** is "USBCD Tablet Speakers" selected in Windows and *Send sound to tablet* on?
 * **App cannot be installed:** follow the notification; uninstall an old app on the tablet if needed.
+* **Samsung tablet is not detected or the app does not start:** check whether Auto Blocker is on
+  (Settings > Security and privacy > Auto Blocker). It blocks USB commands, so turn it off.
 
 **Uninstall:** *Settings → Apps → USBCD*. Removes program, helper service, monitor device and its driver package,
 autostart, Start menu entries, settings, logs (`%LOCALAPPDATA%\USBCD`, `C:\ProgramData\USBCD`) and

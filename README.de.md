@@ -74,6 +74,8 @@ Der Standard-Ausgang für Ton wird **nicht** umgestellt. Für Ton übers Tablet 
 ### Tablet (einmalig)
 1. Einstellungen → Tabletinfo → Softwareinformationen → 7× auf *Buildnummer* tippen.
 2. Entwickleroptionen → **USB-Debugging** einschalten.
+3. Samsung ab One UI 6: **Auto Blocker** ausschalten (Einstellungen > Sicherheit und Datenschutz > Auto Blocker).
+   Solange er an ist, blockiert das Tablet Befehle über USB, und USBCD kann seine App weder installieren noch starten.
 
 ### Installieren
 1. Die neueste **`USBCD-Setup-<version>.exe`** unter [Releases](../../releases/latest) herunterladen und ausführen.
@@ -258,6 +260,8 @@ wichtigen Angaben in `diagnose.txt`. Dienst und Setup protokollieren nach `C:\Pr
   (ohne Tablet absichtlich deaktiviert).
 * **Kein Ton:** Ist in Windows „USBCD Tablet Lautsprecher“ gewählt und *Ton zum Tablet übertragen* an?
 * **App lässt sich nicht installieren:** Meldung beachten; ggf. alte App auf dem Tablet deinstallieren.
+* **Samsung-Tablet wird nicht erkannt oder die App startet nicht:** Prüfen, ob Auto Blocker an ist
+  (Einstellungen > Sicherheit und Datenschutz > Auto Blocker). Er blockiert Befehle über USB, also ausschalten.
 
 **Deinstallieren:** *Einstellungen → Apps → USBCD*. Entfernt Programm, Hilfsdienst, Monitor-Gerät samt
 Treiberpaket, Autostart, Startmenü-Einträge, Einstellungen, Logs (`%LOCALAPPDATA%\USBCD`, `C:\ProgramData\USBCD`)
