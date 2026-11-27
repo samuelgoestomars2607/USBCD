@@ -124,6 +124,9 @@ Source: "diagnose.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "deps\USBCD.apk"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "deps\USBCD.apk.version"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "USBCD.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Symbole für den Infobereich: dunkle bzw. helle Taskleiste
+Source: "USBCD-tray.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "USBCD-tray-light.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Logo für die Windows-Benachrichtigungen
 Source: "USBCD-logo.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "THIRD-PARTY.txt"; DestDir: "{app}"; Flags: ignoreversion

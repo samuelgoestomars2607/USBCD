@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.graphics.Color
-import android.graphics.Outline
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -22,7 +21,6 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
-import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -43,6 +41,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var overlay: FrameLayout
     private lateinit var statusView: TextView
     private lateinit var detailView: TextView
+    private lateinit var footerView: TextView
+    /** Zustand des Ladebildschirms (Knoten, Morph, gedimmt) */
+    private val loader = LoaderState()
+    /** Erstes Videobild ist da, Ausblenden wartet nur noch auf das Ende des Morphs */
+    private var hidePending = false
     private lateinit var mode: Display.Mode
     private var server: StreamServer? = null
     private var decoder: VideoDecoder? = null
@@ -369,62 +372,92 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         includeFontPadding = false
     }
 
-    /** Animierter Verlauf mit Logo und Statustext – liegt über dem Videobild. */
+    /**
+     * Ladebildschirm über dem Videobild: Knoten als Loader mit Schein dahinter, Status, Hinweis
+     * und unten eine Fußzeile mit Name und Display-Daten.
+     */
     private fun buildOverlay(): View {
         val primary = getColor(R.color.text_primary)
         val secondary = getColor(R.color.text_secondary)
+        val muted = getColor(R.color.text_muted)
         overlay = FrameLayout(this)
-        overlay.addView(GradientBackground(this), FrameLayout.LayoutParams(-1, -1))
+
+        val knotBox = FrameLayout(this)
+        val knotView = KnotView(this, loader)
+        val logoView = LogoRevealView(this, loader)
+        knotBox.addView(knotView, FrameLayout.LayoutParams(-1, -1))
+        knotBox.addView(logoView, FrameLayout.LayoutParams(-1, -1))
+        val backdrop = LoaderBackdrop(this, loader, knotBox)
+        overlay.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
+        loader.onChange {
+            knotView.kick()
+            backdrop.invalidate()
+            logoView.invalidate()
+        }
 
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
-        val logo = ImageView(this).apply {
-            setImageResource(R.drawable.logo)
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, view.width * 0.22f)
-                }
-            }
-            clipToOutline = true
-            elevation = dp(6).toFloat()
-        }
-        column.addView(logo, LinearLayout.LayoutParams(dp(112), dp(112)).apply { bottomMargin = dp(28) })
-        column.addView(text(700, 40f, primary).apply { text = "USBCD" })
-        statusView = text(500, 22f, primary)
-        column.addView(statusView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
-        detailView = text(400, 16f, secondary).apply { setLineSpacing(0f, 1.25f) }
-        column.addView(detailView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })
-
+        column.addView(knotBox, LinearLayout.LayoutParams(dp(250), dp(250)))
+        statusView = text(500, 28f, primary)
+        column.addView(statusView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(40) })
+        detailView = text(400, 16f, secondary).apply { setLineSpacing(0f, 1.4f) }
+        column.addView(detailView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16) })
         overlay.addView(column, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply {
-            leftMargin = dp(32); rightMargin = dp(32)
+            leftMargin = dp(32); rightMargin = dp(32); bottomMargin = dp(32)
         })
+
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        footer.addView(text(700, 12f, muted).apply {
+            text = getString(R.string.app_name)
+            letterSpacing = 0.32f
+        })
+        footerView = text(400, 12f, muted)
+        footer.addView(footerView, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+        overlay.addView(footer, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = dp(36)
+        })
+        val (w, h) = DisplayInfo.landscapeSize(mode)
+        footerView.text = "·   " + getString(R.string.display_info, w, h, "%.0f".format(mode.refreshRate))
         return overlay
     }
 
     private fun showOverlay() {
         showingVideo = false
+        hidePending = false
         hideStill()
         overlay.animate().cancel()
         overlay.alpha = 1f
         overlay.visibility = View.VISIBLE
     }
 
+    /** Erstes Videobild: ausblenden – läuft gerade der Morph zum Croissant, erst wenn er fertig ist. */
     private fun hideOverlay() {
+        if (loader.mode == LoaderState.Mode.MORPH && !loader.morphDone(android.os.SystemClock.uptimeMillis())) {
+            hidePending = true
+            return
+        }
         showingVideo = true
+        hidePending = false
         overlay.animate().alpha(0f).setDuration(250).withEndAction { overlay.visibility = View.GONE }.start()
     }
 
+    private val morphFinished = Runnable { if (hidePending) hideOverlay() }
+
     private fun showWaiting() {
-        val (w, h) = DisplayInfo.landscapeSize(mode)
         showOverlay()
+        loader.toWait()
         statusView.text = getString(R.string.waiting)
-        detailView.text = getString(R.string.waiting_detail, w, h, "%.0f".format(mode.refreshRate))
+        detailView.text = getString(R.string.waiting_detail)
     }
 
     private fun showBlocked() {
         showOverlay()
+        loader.toDim()
         statusView.text = getString(R.string.port_busy)
         detailView.text = getString(R.string.port_busy_detail)
     }
@@ -436,12 +469,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private fun showUnsupported() {
         unsupportedShown = true
         showOverlay()
+        loader.toDim()
         statusView.text = getString(R.string.unsupported)
         detailView.text = getString(R.string.unsupported_detail)
     }
 
     private fun showConnecting(info: String) {
         showOverlay()
+        loader.toMorph()
+        ui.removeCallbacks(morphFinished)
+        ui.postDelayed(morphFinished, LoaderState.DONE_MS + 20)
         statusView.text = getString(R.string.connected)
         detailView.text = getString(R.string.starting, info)
     }

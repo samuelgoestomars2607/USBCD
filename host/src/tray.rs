@@ -594,6 +594,57 @@ unsafe fn apply_menu_theme(hwnd: HWND) {
     flush();
 }
 
+/// Lädt das Symbol für den Infobereich passend zur Taskleiste: nur das Croissant, auf
+/// dunkler Taskleiste mit Verlauf, auf heller in Dunkelgrau (der helle Verlauf wäre dort
+/// kaum zu sehen). Liefert true, wenn sich das Symbol geändert hat.
+unsafe fn load_tray_icon() -> bool {
+    // 0 = noch nicht geladen, 1 = dunkel, 2 = hell
+    static MODE: AtomicU32 = AtomicU32::new(0);
+    let mode = if system_uses_dark() { 1 } else { 2 };
+    if MODE.swap(mode, Ordering::Relaxed) == mode {
+        return false;
+    }
+    let dir = crate::config::exe_dir();
+    let mut path = dir.join(if mode == 1 { "USBCD-tray.ico" } else { "USBCD-tray-light.ico" });
+    if !path.exists() {
+        path = dir.join("USBCD.ico");
+    }
+    let ico_path = wide(&path.to_string_lossy());
+    let mut icon = LoadImageW(
+        null_mut(),
+        ico_path.as_ptr(),
+        IMAGE_ICON,
+        0,
+        0,
+        LR_LOADFROMFILE | LR_DEFAULTSIZE,
+    );
+    let fallback = LoadIconW(null_mut(), IDI_APPLICATION);
+    if icon.is_null() {
+        icon = fallback;
+    }
+    let old = ICON.swap(icon as usize, Ordering::Relaxed);
+    // aus Datei geladene Symbole freigeben, das geteilte Windows-Symbol nicht
+    if old != 0 && old != fallback as usize && old != icon as usize {
+        DestroyIcon(old as HICON);
+    }
+    true
+}
+
+/// Ist `p` (nullterminiert, aus lParam) gleich `s`?
+unsafe fn wstr_is(p: *const u16, s: &str) -> bool {
+    if p.is_null() {
+        return false;
+    }
+    let mut i = 0;
+    for c in s.encode_utf16() {
+        if *p.add(i) != c {
+            return false;
+        }
+        i += 1;
+    }
+    *p.add(i) == 0
+}
+
 /// Nutzt die Taskleiste den dunklen Modus? (fehlt der Eintrag: hell)
 fn system_uses_dark() -> bool {
     use windows_sys::Win32::System::Registry::*;
@@ -881,6 +932,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             });
             0
         }
+        WM_SETTINGCHANGE => {
+            // hell/dunkel umgestellt: Symbol im Infobereich anpassen
+            if wstr_is(lp as *const u16, "ImmersiveColorSet") && load_tray_icon() {
+                let mut n = nid(hwnd);
+                n.uFlags = NIF_ICON;
+                n.hIcon = ICON.load(Ordering::Relaxed) as HICON;
+                Shell_NotifyIconW(NIM_MODIFY, &n);
+            }
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_DESTROY => {
             let n = nid(hwnd);
             Shell_NotifyIconW(NIM_DELETE, &n);
@@ -1071,19 +1132,9 @@ pub fn run(show_on_start: bool) {
         wc.lpszClassName = class.as_ptr();
         RegisterClassW(&wc);
 
+        load_tray_icon();
+        // Info-Blase: App-Symbol mit Hintergrund (wie bei den Benachrichtigungen)
         let ico_path = wide(&crate::config::exe_dir().join("USBCD.ico").to_string_lossy());
-        let mut icon = LoadImageW(
-            null_mut(),
-            ico_path.as_ptr(),
-            IMAGE_ICON,
-            0,
-            0,
-            LR_LOADFROMFILE | LR_DEFAULTSIZE,
-        );
-        if icon.is_null() {
-            icon = LoadIconW(null_mut(), IDI_APPLICATION);
-        }
-        ICON.store(icon as usize, Ordering::Relaxed);
         let big = LoadImageW(
             null_mut(),
             ico_path.as_ptr(),

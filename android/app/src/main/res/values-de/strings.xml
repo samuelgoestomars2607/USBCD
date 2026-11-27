@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="waiting">Warte auf den PC …</string>
-    <string name="waiting_detail">Tablet per USB-C mit dem PC verbinden.\nUSB-Debugging muss eingeschaltet sein.\n\nDieses Display: %1$d × %2$d · %3$s Hz</string>
+    <string name="waiting_detail">Tablet per USB-C mit dem PC verbinden.\nUSB-Debugging muss eingeschaltet sein.</string>
     <string name="connected">Verbunden</string>
     <string name="starting">%1$s\nBild wird gestartet …</string>
     <string name="unsupported">Bild wird nicht unterstützt</string>

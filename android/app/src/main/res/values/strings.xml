@@ -2,7 +2,8 @@
 <resources>
     <string name="app_name" translatable="false">USBCD</string>
     <string name="waiting">Waiting for the PC …</string>
-    <string name="waiting_detail">Connect the tablet to the PC via USB-C.\nUSB debugging must be turned on.\n\nThis display: %1$d × %2$d · %3$s Hz</string>
+    <string name="waiting_detail">Connect the tablet to the PC via USB-C.\nUSB debugging must be turned on.</string>
+    <string name="display_info" translatable="false">%1$d × %2$d · %3$s Hz</string>
     <string name="connected">Connected</string>
     <string name="starting">%1$s\nStarting picture …</string>
     <string name="unsupported">Picture not supported</string>

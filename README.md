@@ -48,6 +48,28 @@ to the next one right away and remembers this for that tablet.
 
 The default sound output is **not** changed. For sound on the tablet, choose "USBCD Tablet Speakers" in Windows.
 
+## Comparison with other apps
+
+Everything about the other apps comes from their own description (website, app store listing or source code page),
+as of 27 Nov 2026. Every entry links to the place that backs it up. **?** means: it isn't mentioned there – the app
+may still be able to do it. Found a mistake? Please open an issue.
+
+|  | USBCD | SuperDisplay | spacedesk | Duet Display | Deskreen | Samsung Second Screen |
+|---|---|---|---|---|---|---|
+| **Price** | free, open source (GPL-3.0) | [paid, 3-day free trial](https://superdisplay.app/#:~:text=3%2Dday%20trial) | [free for private use, license for businesses](https://www.spacedesk.net/#:~:text=Commercial%20Business%20License) | [subscription, from $2.99/month (yearly)](https://www.duetdisplay.com/inapp/android-pricing) | [free, open source (AGPL-3.0)](https://www.deskreen.com#:~:text=open%20source%20and%20free%20to%20use); Pro version | [feature of Galaxy Tabs](https://www.samsung.com/ae/support/mobile-devices/extend-your-pc-screen-to-your-galaxy-tablet/) |
+| **Windows** | 11 | [10](https://play.google.com/store/apps/details?id=com.kelocube.mirrorclient#:~:text=Windows%2010) | [8.1, 10, 11](https://apps.apple.com/us/app/-/id1069217220#:~:text=Windows%2011%2C%20Windows%2010%20or%20Windows%208.1) | [Windows and Mac](https://www.duetdisplay.com/inapp/android-pricing#:~:text=Works%20with%20Windows%20and%20Mac) | [Windows, macOS, Linux](https://github.com/pavlobu/deskreen#:~:text=MacOS%2C%20Windows%20and%20Linux) | [10 from 2004 with Wireless Display](https://www.samsung.com/ae/support/mobile-devices/extend-your-pc-screen-to-your-galaxy-tablet/#:~:text=Wireless%20Display) |
+| **Tablet** | Android 8+ (tested: Galaxy Tab S6 Lite) | [Android](https://play.google.com/store/apps/details?id=com.kelocube.mirrorclient) | [Android, iPad, iPhone](https://apps.apple.com/us/app/-/id1069217220#:~:text=iPad%2C%20iPhone) | [Android, iPad, iPhone](https://www.duetdisplay.com/inapp/android-pricing#:~:text=iPad%2C%20iPhone%20or%20Android) | [any device with a browser](https://github.com/pavlobu/deskreen#:~:text=any%20device%20with%20a%20web%20browser) | [Galaxy Tab S7 and newer](https://www.samsung.com/ae/support/mobile-devices/extend-your-pc-screen-to-your-galaxy-tablet/#:~:text=Galaxy%20Tab%20S7) |
+| **Connection** | USB only | [USB or Wi-Fi](https://play.google.com/store/apps/details?id=com.kelocube.mirrorclient#:~:text=via%20USB%20or%20Wi%2DFi) | [USB, Wi-Fi, LAN](https://www.spacedesk.net/#:~:text=USB%20link%2C%20WiFi%20and%20LAN) | [USB; Wi-Fi with the Air plan](https://www.duetdisplay.com/inapp/android-pricing#:~:text=wired%20or%20wireless%20second%20display) | [Wi-Fi](https://www.deskreen.com#:~:text=share%20screen%20video%20over%20WiFi) | [Wi-Fi (Wireless Display)](https://www.samsung.com/ae/support/mobile-devices/extend-your-pc-screen-to-your-galaxy-tablet/#:~:text=Wireless%20Display) |
+| **Touch** | yes | ? | [yes](https://www.spacedesk.net/#:~:text=touchscreen%20%2F%20touchpad) | [gestures](https://www.duetdisplay.com/inapp/android-pricing#:~:text=Gesture%20support) | ? | [yes](https://www.samsung.com/ca/support/mobile-devices/how-to-use-a-second-screen-on-your-tablet/#:~:text=tablet%27s%20touch%20screen) |
+| **Pen with pressure** | yes (S Pen) | [yes](https://play.google.com/store/apps/details?id=com.kelocube.mirrorclient#:~:text=pressure%2Dsensitive%20styluses) | [yes](https://www.spacedesk.net/#:~:text=pressure%20sensitive%20stylus%20pen) | ? | ? | ? ([pen input yes](https://apps.microsoft.com/detail/9pltxw5dx5kb)) |
+| **Sound on the tablet** | yes | ? | [yes](https://www.spacedesk.net/#:~:text=audio%20%2F%20sound) | ? | ? | ? |
+| **Tablet camera as webcam** | yes (front camera) | ? | [no, planned](https://www.spacedesk.net/#:~:text=webcam%20support) | ? | ? | ? |
+| **Connection secured** | mutual authentication; only over the USB cable, not encrypted | ? | [encryption only in the business version, only over the network](https://www.spacedesk.net/#:~:text=password%20protection%20and%20encryption) | ? | [end-to-end encryption](https://www.deskreen.com#:~:text=End%2Dto%2Dend%20encryption) | ? |
+
+To be fair: USBCD has no Wi-Fi mode and only runs on Windows 11. If you need either, spacedesk or SuperDisplay are the
+better choice. Not in the table is OpenDisplay, also open source, because it
+[needs a Mac as the sender](https://github.com/peetzweg/opendisplay/blob/main/PROTOCOL.md#:~:text=the%20Mac%20app%20today).
+
 ## Security
 
 * **USBCD runs without administrator rights** (autostart via `HKCU\…\Run`). The few things that need rights –
@@ -347,7 +369,7 @@ tablet app** – the script shows a warning. You can also install the tablet app
 ```
 docs/       Animations used in this README
 android/    Android Studio project (Kotlin, no third-party libraries)
-            MainActivity (waiting screen, brightness), GradientBackground, Fonts,
+            MainActivity (waiting screen, brightness), LoaderView (loading animation), Fonts,
             DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
             res/values (English), res/values-de (German), adaptive icon with monochrome layer
 host/       Rust: main (device loop, app installation), tray (menu), session, helper (service
