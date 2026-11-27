@@ -507,7 +507,13 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
             }
         }
         if let Some(e) = failed {
-            crate::log!("Video-Verbindung beendet: {e}");
+            // 10058 (WSAESHUTDOWN): Die Eingabe-Seite hat die Verbindung schon geschlossen,
+            // weil das Tablet getrennt wurde oder sich nicht mehr gemeldet hat – kein Fehler.
+            if e.raw_os_error() == Some(10058) {
+                crate::log!("Video-Verbindung beendet: Verbindung zum Tablet geschlossen");
+            } else {
+                crate::log!("Video-Verbindung beendet: {e}");
+            }
             break Err(crate::session::Disconnected.into());
         }
         if eof {
