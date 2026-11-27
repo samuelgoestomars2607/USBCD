@@ -16,67 +16,37 @@ use anyhow::{bail, Context, Result};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-/// Die USBCD-App auf dem Tablet ist nicht geöffnet (z. B. vom Nutzer geschlossen).
-#[derive(Debug)]
-pub struct AppNotRunning;
-impl std::fmt::Display for AppNotRunning {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("USBCD-App ist auf dem Tablet nicht geöffnet")
-    }
+/// Fehlerarten, an denen `run` erkennt, wie eine Verbindung endete (siehe `Outcome`).
+macro_rules! end_reason {
+    ($($(#[$m:meta])* $vis:vis $name:ident => $text:literal;)+) => {$(
+        $(#[$m])*
+        #[derive(Debug)]
+        $vis struct $name;
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str($text)
+            }
+        }
+        impl std::error::Error for $name {}
+    )+};
 }
-impl std::error::Error for AppNotRunning {}
 
-/// Verbindung abgerissen (Kabel gezogen, App geschlossen oder kurzer USB-Aussetzer).
-#[derive(Debug)]
-pub struct Disconnected;
-impl std::fmt::Display for Disconnected {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Verbindung zum Tablet getrennt")
-    }
+end_reason! {
+    /// Die USBCD-App auf dem Tablet ist nicht geöffnet (z. B. vom Nutzer geschlossen).
+    pub AppNotRunning => "USBCD-App ist auf dem Tablet nicht geöffnet";
+    /// Verbindung abgerissen (Kabel gezogen, App geschlossen oder kurzer USB-Aussetzer).
+    pub Disconnected => "Verbindung zum Tablet getrennt";
+    /// Windows zeigt den Tablet-Monitor nicht als eigenen Bildschirm an (z. B. gespiegelt)
+    /// und er ließ sich auch nicht gezielt anhängen.
+    pub NotExtended => "Tablet-Monitor ist nicht Teil des Desktops (nicht „Erweitern“)";
+    /// Kein Decoder des Tablets kann das Bild anzeigen, auch nicht in der kleinsten Stufe.
+    pub Unsupported => "Tablet kann das Bild nicht dekodieren";
+    /// Im Menü „Tablet ausschalten“ gewählt.
+    pub Paused => "Tablet ausgeschaltet";
+    /// Die App läuft, kennt aber das Geheimnis dieser USBCD-Sitzung nicht (z. B. von
+    /// Hand geöffnet, bevor USBCD lief) → mit Geheimnis neu starten.
+    NeedsToken => "App kennt das Sitzungsgeheimnis nicht";
 }
-impl std::error::Error for Disconnected {}
-
-/// Windows zeigt den Tablet-Monitor nicht als eigenen Bildschirm an (z. B. gespiegelt)
-/// und er ließ sich auch nicht gezielt anhängen.
-#[derive(Debug)]
-pub struct NotExtended;
-impl std::fmt::Display for NotExtended {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Tablet-Monitor ist nicht Teil des Desktops (nicht „Erweitern“)")
-    }
-}
-impl std::error::Error for NotExtended {}
-
-/// Kein Decoder des Tablets kann das Bild anzeigen, auch nicht in der kleinsten Stufe.
-#[derive(Debug)]
-pub struct Unsupported;
-impl std::fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Tablet kann das Bild nicht dekodieren")
-    }
-}
-impl std::error::Error for Unsupported {}
-
-/// Im Menü „Tablet ausschalten“ gewählt.
-#[derive(Debug)]
-pub struct Paused;
-impl std::fmt::Display for Paused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Tablet ausgeschaltet")
-    }
-}
-impl std::error::Error for Paused {}
-
-/// Die App läuft, kennt aber das Geheimnis dieser USBCD-Sitzung nicht (z. B. von
-/// Hand geöffnet, bevor USBCD lief) → mit Geheimnis neu starten.
-#[derive(Debug)]
-struct NeedsToken;
-impl std::fmt::Display for NeedsToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("App kennt das Sitzungsgeheimnis nicht")
-    }
-}
-impl std::error::Error for NeedsToken {}
 
 pub enum Outcome {
     AppNotRunning,
