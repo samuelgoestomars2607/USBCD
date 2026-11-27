@@ -4,8 +4,8 @@
 use crate::config::Config;
 use crate::display::GpuVendor;
 use crate::nal::{AnnexBSplitter, Codec};
+use crate::process::command;
 use crate::proto::{write_video, VF_CONFIG, VF_KEY};
-use crate::util::command;
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Read};
 use std::net::TcpStream;
@@ -384,10 +384,10 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = crate::util::spawn_stream(&mut cmd, cfg.stream_priority)
+    let mut child = crate::process::spawn_stream(&mut cmd, cfg.stream_priority)
         .context("ffmpeg konnte nicht gestartet werden")?;
     // Übertragung arbeitet in Echtzeit: auf dem Akku nicht drosseln
-    crate::util::high_qos_current_thread();
+    crate::process::high_qos_current_thread();
 
     if let Some(err) = child.stderr.take() {
         std::thread::spawn(move || {
@@ -407,7 +407,7 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
     // ist (kurze Schreibpause) und können es ohne ein Bild Verzögerung senden.
     let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(256);
     std::thread::spawn(move || {
-        crate::util::high_qos_current_thread();
+        crate::process::high_qos_current_thread();
         let mut buf = vec![0u8; 256 * 1024];
         loop {
             match out.read(&mut buf) {
@@ -456,20 +456,20 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
                 false
             }
             Err(RecvTimeoutError::Timeout) => {
-                if crate::util::take_reconnect() {
+                if crate::state::take_reconnect() {
                     break Ok(StreamEnd::Restart);
                 }
                 if pending {
                     splitter.flush_pending(&mut aus);
                     pending = false;
                 }
-                if crate::util::shutdown() {
+                if crate::state::shutdown() {
                     break Err(crate::session::Disconnected.into());
                 }
-                if crate::util::paused() {
+                if crate::state::paused() {
                     break Err(crate::session::Paused.into());
                 }
-                if crate::util::take_end_session() {
+                if crate::state::take_end_session() {
                     break Err(crate::session::Disconnected.into());
                 }
                 false
@@ -480,7 +480,7 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
             }
         };
         let mut failed = None;
-        if crate::util::take_settings_dirty() {
+        if crate::state::take_settings_dirty() {
             if let Err(e) = send_settings(sock) {
                 failed = Some(e);
             }

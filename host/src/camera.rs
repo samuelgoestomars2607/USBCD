@@ -215,7 +215,7 @@ pub fn on_tablet_state(payload: &[u8]) {
     };
     crate::log!("Webcam: Tablet meldet {state:?}");
     if state == TabletCam::Denied {
-        crate::util::notify(
+        crate::notify::once(
             "camdenied",
             tr("Kamerazugriff am Tablet verweigert", "Camera access denied on the tablet"),
             tr(
@@ -363,11 +363,11 @@ fn decoder_args(rotation: u32) -> Vec<String> {
 }
 
 fn start_decoder(rotation: u32) {
-    if crate::util::windows_ending() {
+    if crate::state::windows_ending() {
         return;
     }
     let exe = crate::config::current().ffmpeg_exe;
-    let child = crate::util::command(&exe)
+    let child = crate::process::command(&exe)
         .args(decoder_args(rotation))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -380,7 +380,7 @@ fn start_decoder(rotation: u32) {
             return;
         }
     };
-    crate::util::bind_to_us(&child);
+    crate::process::bind_to_us(&child);
     let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let (tx, rx) = sync_channel::<Vec<u8>>(30);
     if let Some(mut stdin) = child.stdin.take() {
@@ -461,7 +461,7 @@ mod dll {
         if !path.exists() {
             return Err(format!("{} fehlt", path.display()));
         }
-        let p = crate::util::wide(&path.to_string_lossy());
+        let p = crate::win::wide(&path.to_string_lossy());
         unsafe {
             let m = LoadLibraryExW(
                 p.as_ptr(),
@@ -490,7 +490,7 @@ mod dll {
                 std::mem::transmute::<unsafe extern "system" fn() -> isize, StartFn>(s);
             let stop: StopFn =
                 std::mem::transmute::<unsafe extern "system" fn() -> isize, StopFn>(t);
-            let n = crate::util::wide(name);
+            let n = crate::win::wide(name);
             let mut h: *mut c_void = std::ptr::null_mut();
             let hr = start(n.as_ptr(), &mut h);
             if hr < 0 || h.is_null() {
@@ -530,7 +530,7 @@ fn manager() {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             g.enabled
         };
-        if crate::util::shutdown() {
+        if crate::state::shutdown() {
             break;
         }
         if !enabled || RETRY.swap(false, Ordering::SeqCst) {
@@ -550,7 +550,7 @@ fn manager() {
                             .ok();
                     }
                     if ANNOUNCE.swap(false, Ordering::SeqCst) {
-                        crate::util::notify(
+                        crate::notify::once(
                             "camon",
                             tr("Webcam eingeschaltet", "Webcam turned on"),
                             &format!(
@@ -572,7 +572,7 @@ fn manager() {
                 Err(e) => {
                     failed_for = true;
                     ANNOUNCE.store(false, Ordering::SeqCst);
-                    crate::util::notify(
+                    crate::notify::once(
                         "camera",
                         tr("Webcam nicht verfügbar", "Webcam not available"),
                         &format!(
@@ -603,7 +603,7 @@ fn manager() {
 fn poke_pipe() {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_GENERIC_READ, OPEN_EXISTING};
-    let name = crate::util::wide(PIPE_NAME);
+    let name = crate::win::wide(PIPE_NAME);
     unsafe {
         let h = CreateFileW(
             name.as_ptr(),
@@ -644,7 +644,7 @@ fn current_frame(s: &mut St) -> Arc<Vec<u8>> {
 
 /// (Statuszeile, Hinweis darunter) – wie der Wartebildschirm auf dem Tablet.
 fn placeholder_text(t: &TabletCam) -> (&'static str, &'static str) {
-    if crate::util::paused() {
+    if crate::state::paused() {
         return (
             tr("Tablet ausgeschaltet", "Tablet switched off"),
             tr(
@@ -721,7 +721,7 @@ fn pipe_server() {
         PIPE_TYPE_BYTE, PIPE_WAIT,
     };
 
-    let sddl = crate::util::wide(PIPE_SDDL);
+    let sddl = crate::win::wide(PIPE_SDDL);
     let mut sd: *mut c_void = null_mut();
     if unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -740,10 +740,10 @@ fn pipe_server() {
         lpSecurityDescriptor: sd,
         bInheritHandle: 0,
     };
-    let name = crate::util::wide(PIPE_NAME);
+    let name = crate::win::wide(PIPE_NAME);
     let head = header();
     let mut warned = false;
-    while !crate::util::shutdown() {
+    while !crate::state::shutdown() {
         let enabled = with(|s| s.enabled && s.created);
         if !enabled {
             std::thread::sleep(Duration::from_millis(300));
@@ -767,7 +767,7 @@ fn pipe_server() {
                 warned = true;
                 crate::log!("Webcam: Pipe belegt oder nicht anlegbar (Fehler {e})");
                 if e == ERROR_ACCESS_DENIED {
-                    crate::util::notify(
+                    crate::notify::once(
                         "security",
                         tr("Sicherheitswarnung", "Security warning"),
                         tr(
@@ -784,7 +784,7 @@ fn pipe_server() {
         warned = false;
         let connected = unsafe { ConnectNamedPipe(pipe, null_mut()) } != 0
             || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
-        if connected && with(|s| s.enabled && s.created) && !crate::util::shutdown() {
+        if connected && with(|s| s.enabled && s.created) && !crate::state::shutdown() {
             crate::log!("Webcam: eine App benutzt die Kamera");
             // Tablet-Kamera läuft evtl. noch (App hat kurz neu verbunden) → gleich dekodieren
             let running = with(|s| {
@@ -810,7 +810,7 @@ fn pipe_server() {
                             s.seq == sent && s.enabled
                         })
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if !g.enabled || crate::util::shutdown() {
+                    if !g.enabled || crate::state::shutdown() {
                         break;
                     }
                     sent = g.seq;
@@ -977,7 +977,7 @@ fn draw_text(bgra: &mut [u8], top: i32, status: &str, lines: &[&str]) {
         SetBkMode(dc, TRANSPARENT as i32);
 
         let font = |face: &str, px: i32| {
-            let f = crate::util::wide(face);
+            let f = crate::win::wide(face);
             CreateFontW(
                 -px,
                 0,
@@ -998,7 +998,7 @@ fn draw_text(bgra: &mut [u8], top: i32, status: &str, lines: &[&str]) {
         let line = |txt: &str, f: HFONT, color: u32, y: i32, h: i32| {
             let prev = SelectObject(dc, f);
             SetTextColor(dc, color);
-            let mut w = crate::util::wide(txt);
+            let mut w = crate::win::wide(txt);
             let mut r = RECT {
                 left: 40,
                 top: y,

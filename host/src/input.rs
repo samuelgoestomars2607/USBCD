@@ -311,7 +311,10 @@ impl Injector {
     /// Desktops (nicht des Hauptbildschirms). Liegt das Tablet links vom Hauptmonitor
     /// (x negativ), landeten Eingaben sonst außerhalb und wurden still verworfen.
     fn area(&mut self) -> Option<Placement> {
-        if self.area_at.is_none_or(|t| t.elapsed() > Duration::from_millis(750)) {
+        if self
+            .area_at
+            .is_none_or(|t| t.elapsed() > Duration::from_millis(750))
+        {
             let (ox, oy) = crate::display::virtual_origin();
             let next = crate::display::current_placement(&self.vd).map(|p| to_virtual(p, ox, oy));
             if next.is_none() && self.area.is_some() {

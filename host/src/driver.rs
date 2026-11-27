@@ -4,7 +4,8 @@
 //!   USBCD.exe --install-driver <pfad\zur.inf> <Hardware-ID>
 //!   USBCD.exe --remove-device <Hardware-ID>
 
-use crate::util::{from_wide, wide};
+use crate::win::from_wide;
+use crate::win::wide;
 use anyhow::{bail, Result};
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};

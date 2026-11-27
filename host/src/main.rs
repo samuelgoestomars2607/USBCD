@@ -13,17 +13,20 @@ mod helper;
 mod i18n;
 mod input;
 mod ladder;
+mod log;
 mod nal;
 mod notify;
+mod process;
 mod proto;
 mod session;
+mod state;
 mod still;
 mod tray;
 mod update;
-mod util;
 mod vdd;
 mod video;
 mod wallpaper;
+mod win;
 
 use adb::Adb;
 use config::Config;
@@ -41,8 +44,8 @@ fn program_data() -> std::path::PathBuf {
 }
 
 fn admin_log(name: &str) {
-    util::set_log_file(program_data().join(name));
-    util::init_log();
+    log::set_log_file(program_data().join(name));
+    log::init_log();
 }
 
 fn main() {
@@ -114,11 +117,11 @@ fn main() {
 
     // Abstürze in Hintergrund-Threads ins Log schreiben statt unsichtbar zu verschwinden
     std::panic::set_hook(Box::new(|info| {
-        crate::util::log_line(&format!("Programmfehler: {info}"));
+        crate::log::log_line(&format!("Programmfehler: {info}"));
     }));
 
     // --- normales Programm (ohne Administratorrechte) ---
-    util::quiet_error_boxes();
+    process::quiet_error_boxes();
     // Echte Pixel-Koordinaten (wichtig für Touch/Stift und Monitorlage bei Skalierung)
     unsafe {
         windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
@@ -132,7 +135,7 @@ fn main() {
         }
         return;
     }
-    util::init_log();
+    log::init_log();
     let cfg = Config::load();
     config::set_current(cfg.clone());
 
@@ -157,7 +160,7 @@ fn main() {
     }
     if first == Some("--open-folder") {
         // Startmenü „Einstellungen und Log“
-        let _ = util::command("explorer.exe")
+        let _ = process::command("explorer.exe")
             .arg(config::data_dir())
             .spawn();
         return;
@@ -187,7 +190,7 @@ fn main() {
     camera::init();
     update::cleanup();
     update::start(args.iter().any(|a| a == "--update-test"));
-    util::set_status(tr("Wird vorbereitet …", "Getting ready …"));
+    state::set_status(tr("Wird vorbereitet …", "Getting ready …"));
 
     // Vorbereitung und Tablet-Erkennung im Hintergrund – das Symbol erscheint sofort
     let worker_cfg = cfg.clone();
@@ -197,7 +200,7 @@ fn main() {
     });
 
     tray::run(args.iter().any(|a| a == "--show")); // blockiert bis „Beenden“
-    util::set_shutdown();
+    state::set_shutdown();
     log!("USBCD wird beendet …");
     let t = Instant::now();
     while !worker.is_finished() && t.elapsed() < Duration::from_secs(8) {
@@ -209,7 +212,7 @@ fn main() {
 fn single_instance() -> bool {
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
-    let name = util::wide(r"Local\USBCD-Instanz");
+    let name = win::wide(r"Local\USBCD-Instanz");
     // Handle bleibt bis Programmende offen
     let h = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     !h.is_null() && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS
@@ -220,14 +223,14 @@ fn prepare(cfg: &Config) {
     log!("adb: {} | ffmpeg: {}", cfg.adb_exe, cfg.ffmpeg_exe);
     match video::check_ffmpeg(&cfg.ffmpeg_exe) {
         Ok(true) => {}
-        Ok(false) if cfg.capture_method != "ddagrab" => util::notify(
+        Ok(false) if cfg.capture_method != "ddagrab" => notify::once(
             "ffmpeg",
             tr("USBCD: Bildübertragung nicht möglich", "USBCD: cannot transmit the picture"),
             tr("Die mitgelieferte FFmpeg-Version ist zu alt. Bitte das USBCD-Setup neu bauen und installieren.", "The bundled FFmpeg version is too old. Please rebuild and reinstall the USBCD setup."),
             Duration::from_secs(3600),
         ),
         Ok(false) => {}
-        Err(e) => util::notify(
+        Err(e) => notify::once(
             "ffmpeg",
             tr("USBCD: Bildübertragung nicht möglich", "USBCD: cannot transmit the picture"),
             &format!("{} ({e})", tr("FFmpeg fehlt. Bitte das USBCD-Setup erneut ausführen.", "FFmpeg is missing. Please run the USBCD setup again.")),
@@ -246,7 +249,7 @@ fn prepare(cfg: &Config) {
         }
         Err(e) => {
             log!("Hilfsdienst: {e:#}");
-            util::notify(
+            notify::once(
                 "helper",
                 tr("USBCD: Hilfsdienst fehlt", "USBCD: helper service missing"),
                 &format!("{e}"),
@@ -256,7 +259,7 @@ fn prepare(cfg: &Config) {
     }
     audio::prepare_endpoint(cfg);
     tray::set_autostart_known(autostart::enabled());
-    util::set_status(waiting());
+    state::set_status(waiting());
 }
 
 fn waiting() -> &'static str {
@@ -305,8 +308,8 @@ fn device_name(adb: &Adb, serial: &str) -> String {
 
 /// „Neues Gerät erkannt“ – fragt, ob es als Bildschirm verwendet werden soll.
 fn ask_new_device(serial: &str, name: &str) {
-    util::add_pending(serial, name);
-    util::set_status(tr(
+    state::add_pending(serial, name);
+    state::set_status(tr(
         "Neues Gerät erkannt – im Menü unter „Geräte“ bestätigen",
         "New device detected – confirm under “Devices” in the menu",
     ));
@@ -378,12 +381,12 @@ fn device_loop(cfg: Config) {
     // (Wiederholungen, Pause, Zustimmung).
     let tracker = adb::Tracker::start(&adb);
     let mut seen = 0u64;
-    while !util::shutdown() {
+    while !state::shutdown() {
         let tracked = tracker.wait(&mut seen, Duration::from_secs(1));
-        if util::shutdown() {
+        if state::shutdown() {
             break;
         }
-        if util::windows_ending() {
+        if state::windows_ending() {
             // Herunterfahren: nichts Neues mehr starten, keine Meldungen
             continue;
         }
@@ -411,7 +414,7 @@ fn device_loop(cfg: Config) {
             if let Some(d) = devs.remove(&s) {
                 if d.had_session {
                     log!("Tablet {s} abgezogen");
-                    util::notify(
+                    notify::once(
                         "disconnected",
                         tr("Tablet getrennt", "Tablet disconnected"),
                         tr(
@@ -423,9 +426,9 @@ fn device_loop(cfg: Config) {
                 }
             }
             display_off(&mut display_on);
-            util::remove_pending(&s);
+            state::remove_pending(&s);
             // „Tablet ausschalten“ gilt nur bis zum Abziehen
-            util::set_paused(false);
+            state::set_paused(false);
             for k in [
                 "connected",
                 "unauthorized",
@@ -436,14 +439,14 @@ fn device_loop(cfg: Config) {
                 "notextended",
                 "unsupported",
             ] {
-                util::reset_notify(k);
+                notify::reset(k);
             }
-            util::set_status(waiting());
+            state::set_status(waiting());
         }
 
-        let launch_req = util::take_launch_request();
+        let launch_req = state::take_launch_request();
         if launch_req && list.is_empty() {
-            util::notify(
+            notify::once(
                 "nolaunch",
                 tr("Kein Tablet gefunden", "No tablet found"),
                 tr(
@@ -485,7 +488,7 @@ fn device_loop(cfg: Config) {
                         d.serial
                     );
                     display_off(&mut display_on);
-                    util::set_status(waiting());
+                    state::set_status(waiting());
                 }
                 continue;
             }
@@ -495,12 +498,12 @@ fn device_loop(cfg: Config) {
                     st.state = d.state.clone();
                     if d.state == "unauthorized" {
                         log!("{}: USB-Debugging noch nicht erlaubt", d.serial);
-                        util::set_status(tr(
+                        state::set_status(tr(
                             "Auf dem Tablet USB-Debugging erlauben",
                             "Allow USB debugging on the tablet",
                         ));
                         // bekanntes Tablet: deutlich hinweisen; fremdes Gerät: nur leise
-                        util::notify(
+                        notify::once(
                             "unauthorized",
                             if known.is_some() {
                                 tr(
@@ -553,17 +556,17 @@ fn device_loop(cfg: Config) {
                     continue;
                 }
             }
-            util::remove_pending(&d.serial);
+            state::remove_pending(&d.serial);
 
             // Menü „Tablet ausschalten“: Monitor weg, Display aus, warten auf „wieder ein“
-            if util::paused() {
+            if state::paused() {
                 if !st.asleep {
                     st.asleep = true;
                     display_on = true;
                     display_off(&mut display_on);
                     let _ = adb.on(&d.serial, &["shell", "input", "keyevent", "KEYCODE_SLEEP"]);
                     log!("Tablet ausgeschaltet (Menü)");
-                    util::set_status(tr(
+                    state::set_status(tr(
                         "Tablet ausgeschaltet – Menü → „Tablet wieder einschalten“",
                         "Tablet switched off – menu → “Switch tablet back on”",
                     ));
@@ -599,11 +602,11 @@ fn device_loop(cfg: Config) {
                         "Tablet {}: USBCD-App wird {what} (Version {bundled})",
                         d.serial
                     );
-                    util::set_status(tr(
+                    state::set_status(tr(
                         "USBCD-App wird auf dem Tablet installiert …",
                         "Installing the USBCD app on the tablet …",
                     ));
-                    util::notify(
+                    notify::once(
                         "installing",
                         title,
                         tr(
@@ -646,7 +649,7 @@ fn device_loop(cfg: Config) {
                             } else {
                                 tr("Die App konnte nicht installiert werden. Details: Menü → „Einstellungen und Log öffnen“.", "The app could not be installed. Details: menu → “Open settings and log”.")
                             };
-                            util::notify(
+                            notify::once(
                                 "installfail",
                                 tr("App-Installation fehlgeschlagen", "App installation failed"),
                                 hint,
@@ -658,12 +661,12 @@ fn device_loop(cfg: Config) {
             }
             if installed.is_none() {
                 log!("{}: USBCD-App nicht installiert", d.serial);
-                util::set_status(tr(
+                state::set_status(tr(
                     "Tablet angeschlossen – USBCD-App fehlt",
                     "Tablet connected – USBCD app missing",
                 ));
                 if !st.install_failed {
-                    util::notify(
+                    notify::once(
                         "noapp",
                         tr("USBCD-App fehlt auf dem Tablet", "USBCD app missing on the tablet"),
                         tr("Bitte die USBCD-App auf dem Tablet installieren (USBCD-Setup erneut ausführen oder Android Studio → Run).", "Please install the USBCD app on the tablet (run the USBCD setup again or Android Studio → Run)."),
@@ -677,7 +680,7 @@ fn device_loop(cfg: Config) {
             let launch = st.launch;
             if launch {
                 log!("Tablet {} angeschlossen – starte App", d.serial);
-                util::set_status(tr("Tablet wird verbunden …", "Connecting tablet …"));
+                state::set_status(tr("Tablet wird verbunden …", "Connecting tablet …"));
             }
             let outcome = session::run(&config::current(), &adb, &d.serial, launch);
             st.launch = false;
@@ -688,12 +691,12 @@ fn device_loop(cfg: Config) {
                     if !st.app_closed {
                         st.app_closed = true;
                         log!("Tablet {}: USBCD-App ist geschlossen", d.serial);
-                        util::set_status(tr(
+                        state::set_status(tr(
                             "Tablet angeschlossen – Anzeige beendet",
                             "Tablet connected – display stopped",
                         ));
                         if st.had_session {
-                            util::notify(
+                            notify::once(
                                 "appclosed",
                                 tr("Tablet-Anzeige beendet", "Tablet display stopped"),
                                 tr("Zum Fortsetzen: USBCD-Symbol → „Auf dem Tablet anzeigen“ oder die USBCD-App auf dem Tablet öffnen.", "To continue: USBCD icon → “Show on tablet”, or open the USBCD app on the tablet."),
@@ -713,18 +716,18 @@ fn device_loop(cfg: Config) {
                     st.had_session = true;
                     st.app_closed = false;
                     display_on = true; // bleibt an, bis klar ist, ob das Tablet noch da ist
-                    util::set_status(waiting());
+                    state::set_status(waiting());
                     st.retry_at = Instant::now() + Duration::from_secs(2);
                 }
                 session::Outcome::NotExtended => {
                     display_on = true;
                     display_off(&mut display_on);
                     st.launch = launch;
-                    util::set_status(tr(
+                    state::set_status(tr(
                         "Tablet ist noch kein eigener Bildschirm",
                         "Tablet is not a separate screen yet",
                     ));
-                    util::notify_with(
+                    notify::once_with(
                         "notextended",
                         tr("Tablet ist noch kein eigener Bildschirm", "Tablet is not a separate screen yet"),
                         tr(
@@ -743,11 +746,11 @@ fn device_loop(cfg: Config) {
                     display_on = true;
                     display_off(&mut display_on);
                     st.launch = false; // App zeigt den Hinweis – nicht neu starten
-                    util::set_status(tr(
+                    state::set_status(tr(
                         "Tablet kann das Bild nicht anzeigen",
                         "Tablet cannot display the picture",
                     ));
-                    util::notify(
+                    notify::once(
                         "unsupported",
                         tr("Tablet kann das Bild nicht anzeigen", "Tablet cannot display the picture"),
                         tr(
@@ -764,8 +767,8 @@ fn device_loop(cfg: Config) {
                     display_off(&mut display_on);
                     st.launch = launch; // beim nächsten Versuch App ggf. erneut starten
                     log!("Tablet {}: {e:#}", d.serial);
-                    util::set_status(tr("Fehler – Details im Log", "Error – see log for details"));
-                    util::notify(
+                    state::set_status(tr("Fehler – Details im Log", "Error – see log for details"));
+                    notify::once(
                         "failed",
                         tr("USBCD: Übertragung fehlgeschlagen", "USBCD: transmission failed"),
                         &format!(

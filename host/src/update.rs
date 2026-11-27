@@ -389,7 +389,7 @@ fn https_get(
     {
         return Err(anyhow::anyhow!("ungültige Adresse").into());
     }
-    let w = crate::util::wide;
+    let w = crate::win::wide;
     let agent = w(&format!("USBCD/{}", env!("CARGO_PKG_VERSION")));
     unsafe {
         let session = Handle(WinHttpOpen(
@@ -551,12 +551,12 @@ pub fn start(test: bool) {
         loop {
             let t = Instant::now();
             while t.elapsed() < wait && !CHECK_NOW.load(Ordering::SeqCst) {
-                if crate::util::shutdown() {
+                if crate::state::shutdown() {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
-            if crate::util::shutdown() {
+            if crate::state::shutdown() {
                 return;
             }
             let forced = CHECK_NOW.swap(false, Ordering::SeqCst);
@@ -648,7 +648,7 @@ pub fn install(version: &str) {
 }
 
 fn fail(text: &str, security: bool) {
-    crate::util::notify(
+    crate::notify::once(
         if security { "security" } else { "updatefail" },
         tr(
             "USBCD-Update nicht installiert",
@@ -663,7 +663,7 @@ fn download_and_run(r: &Release) -> anyhow::Result<()> {
     let dir = update_dir();
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
-    crate::util::notify(
+    crate::notify::once(
         "updating",
         tr("USBCD-Update wird geladen", "Downloading USBCD update"),
         &tr(
@@ -777,10 +777,10 @@ fn run_setup(setup: &Path) -> Result<(), bool> {
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
     };
-    let verb = crate::util::wide("runas");
-    let file = crate::util::wide(&setup.to_string_lossy());
+    let verb = crate::win::wide("runas");
+    let file = crate::win::wide(&setup.to_string_lossy());
     // /SILENT: nur Fortschritt; Aufgaben und Sprache übernimmt Inno von der letzten Installation
-    let params = crate::util::wide("/SILENT /SP-");
+    let params = crate::win::wide("/SILENT /SP-");
     unsafe {
         let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
         info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;

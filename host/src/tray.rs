@@ -2,7 +2,9 @@
 //! Läuft im Hauptthread; die Tablet-Erkennung arbeitet in einem eigenen Thread.
 
 use crate::i18n::tr;
-use crate::util::{set_shutdown, status, wide};
+use crate::state::set_shutdown;
+use crate::state::status;
+use crate::win::wide;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -224,7 +226,9 @@ static DISPLAY_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn update_dark() {
-    crate::util::set_pc_dark(DISPLAY_OFF.load(Ordering::Relaxed) || LOCKED.load(Ordering::Relaxed));
+    crate::state::set_pc_dark(
+        DISPLAY_OFF.load(Ordering::Relaxed) || LOCKED.load(Ordering::Relaxed),
+    );
 }
 
 static AUTOSTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -355,7 +359,7 @@ unsafe fn show_menu(hwnd: HWND) {
     // Geräte: neue zuerst, dann bekannte (Haken = als Bildschirm verwenden)
     let devices = CreatePopupMenu();
     let mut entries = Vec::new();
-    for (serial, name) in crate::util::pending_devices() {
+    for (serial, name) in crate::state::pending_devices() {
         if !cfg.devices.contains_key(&serial) {
             entries.push((
                 format!(
@@ -503,7 +507,7 @@ unsafe fn show_menu(hwnd: HWND) {
         m,
         MF_STRING,
         ID_PAUSE,
-        if crate::util::paused() {
+        if crate::state::paused() {
             tr("Tablet wieder einschalten", "Switch tablet back on")
         } else {
             tr(
@@ -698,8 +702,8 @@ fn handle_setting(id: usize) -> bool {
     match id {
         ID_AUDIO => {
             update(|c| c.audio_enabled = !c.audio_enabled);
-            crate::util::mark_settings_dirty(); // Lautstärketasten hängen davon ab
-            crate::util::request_reconnect();
+            crate::state::mark_settings_dirty(); // Lautstärketasten hängen davon ab
+            crate::state::request_reconnect();
         }
         ID_Q_LOW | ID_Q_STD | ID_Q_HIGH => {
             let v = match id {
@@ -711,15 +715,15 @@ fn handle_setting(id: usize) -> bool {
                 c.bitrate_mbps = v;
                 c.quality_max = false;
             });
-            crate::util::request_reconnect();
+            crate::state::request_reconnect();
         }
         ID_Q_MAX => {
             update(|c| c.quality_max = true);
-            crate::util::request_reconnect();
+            crate::state::request_reconnect();
         }
         ID_STILLS => {
             update(|c| c.lossless_stills = !c.lossless_stills);
-            crate::util::request_reconnect();
+            crate::state::request_reconnect();
         }
         i if (ID_PEN_BASE..ID_PEN_BASE + PEN_CURVES.len()).contains(&i) => {
             let curve = PEN_CURVES[i - ID_PEN_BASE];
@@ -732,24 +736,24 @@ fn handle_setting(id: usize) -> bool {
         i if (ID_B_BASE..ID_B_BASE + BRIGHTNESS.len()).contains(&i) => {
             let b = BRIGHTNESS[i - ID_B_BASE];
             update(|c| c.tablet_brightness = b);
-            crate::util::mark_settings_dirty();
+            crate::state::mark_settings_dirty();
         }
         ID_INPUT => {
             update(|c| c.tablet_input = !c.tablet_input);
-            crate::util::mark_settings_dirty();
+            crate::state::mark_settings_dirty();
         }
         ID_STATS => {
             update(|c| c.show_stats = !c.show_stats);
-            crate::util::mark_settings_dirty();
+            crate::state::mark_settings_dirty();
         }
         ID_POWER => update(|c| c.follow_pc_power = !c.follow_pc_power),
         ID_DND => {
             update(|c| c.tablet_dnd = !c.tablet_dnd);
-            crate::util::mark_settings_dirty();
+            crate::state::mark_settings_dirty();
         }
         ID_VOLKEYS => {
             update(|c| c.tablet_volume_keys = !c.tablet_volume_keys);
-            crate::util::mark_settings_dirty();
+            crate::state::mark_settings_dirty();
         }
         ID_UPDCHECK => {
             let on = !crate::config::current().update_check;
@@ -765,7 +769,7 @@ fn handle_setting(id: usize) -> bool {
             update(|c| c.webcam = on);
             crate::camera::set_enabled(on, on);
             if !on {
-                crate::util::notify(
+                crate::notify::once(
                     "camon",
                     tr("Webcam ausgeschaltet", "Webcam turned off"),
                     tr(
@@ -776,7 +780,7 @@ fn handle_setting(id: usize) -> bool {
                 );
             }
         }
-        ID_PAUSE => crate::util::set_paused(!crate::util::paused()),
+        ID_PAUSE => crate::state::set_paused(!crate::state::paused()),
         i if i >= ID_DEV_BASE => {
             let entry = MENU_DEVICES
                 .lock()
@@ -791,7 +795,7 @@ fn handle_setting(id: usize) -> bool {
                 if crate::autostart::enabled() {
                     crate::autostart::disable();
                     set_autostart_known(false);
-                    crate::util::notify(
+                    crate::notify::once(
                         "autostart",
                         tr("Autostart ausgeschaltet", "Autostart turned off"),
                         tr(
@@ -804,7 +808,7 @@ fn handle_setting(id: usize) -> bool {
                     match crate::autostart::enable() {
                         Ok(()) => {
                             set_autostart_known(true);
-                            crate::util::notify(
+                            crate::notify::once(
                                 "autostart",
                                 tr("Autostart eingeschaltet", "Autostart turned on"),
                                 tr(
@@ -814,7 +818,7 @@ fn handle_setting(id: usize) -> bool {
                                 std::time::Duration::ZERO,
                             );
                         }
-                        Err(e) => crate::util::notify(
+                        Err(e) => crate::notify::once(
                             "autostart",
                             tr("Autostart nicht möglich", "Autostart not possible"),
                             &format!("{e}"),
@@ -847,7 +851,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             match wp & 0xFFFF {
-                ID_LAUNCH => crate::util::request_launch(),
+                ID_LAUNCH => crate::state::request_launch(),
                 ID_UPDATE => {
                     if let Some(r) = crate::update::available() {
                         crate::update::install(&r.version);
@@ -1002,14 +1006,14 @@ fn set_device(serial: &str, name: &str, use_it: bool) {
             },
         );
     });
-    crate::util::remove_pending(serial);
-    crate::util::reset_notify("device-choice");
+    crate::state::remove_pending(serial);
+    crate::notify::reset("device-choice");
     if use_it {
         crate::log!("Gerät {serial} ({name}) als Bildschirm zugelassen");
     } else {
         crate::log!("Gerät {serial} ({name}) auf „nie verwenden“ gestellt");
-        crate::util::request_end_session();
-        crate::util::notify(
+        crate::state::request_end_session();
+        crate::notify::once(
             "device-choice",
             tr("Gerät wird nicht verwendet", "Device will not be used"),
             &format!(
@@ -1034,10 +1038,10 @@ fn handle_uri(uri: &str) {
         Some(Action::ExtendDisplays) => match crate::display::extend_all() {
             Ok(()) => {
                 crate::log!("Anzeige auf „Erweitern“ umgestellt (Klick in der Meldung)");
-                crate::util::reset_notify("notextended");
-                crate::util::request_launch(); // sofort neu verbinden
+                crate::notify::reset("notextended");
+                crate::state::request_launch(); // sofort neu verbinden
             }
-            Err(e) => crate::util::notify(
+            Err(e) => crate::notify::once(
                 "failed",
                 crate::i18n::tr("USBCD: Erweitern fehlgeschlagen", "USBCD: extending failed"),
                 &format!(
@@ -1051,7 +1055,7 @@ fn handle_uri(uri: &str) {
             ),
         },
         Some(Action::UseDevice(s)) | Some(Action::NeverDevice(s))
-            if !crate::util::pending_devices().iter().any(|(p, _)| p == &s)
+            if !crate::state::pending_devices().iter().any(|(p, _)| p == &s)
                 && !crate::config::current().devices.contains_key(&s) =>
         {
             crate::log!("USBCD-Link für unbekanntes Gerät {s} ignoriert");
@@ -1073,7 +1077,7 @@ fn handle_uri(uri: &str) {
 }
 
 fn name_of(serial: &str) -> String {
-    crate::util::pending_devices()
+    crate::state::pending_devices()
         .into_iter()
         .find(|(s, _)| s == serial)
         .map(|(_, n)| n)

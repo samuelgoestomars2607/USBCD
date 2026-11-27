@@ -1,7 +1,8 @@
 //! Windows-Anzeige-APIs (GDI): virtuellen Monitor finden, Auflösung/Hz setzen,
 //! HMONITOR für die Bildschirmaufnahme ermitteln.
 
-use crate::util::{from_wide, wide};
+use crate::win::from_wide;
+use crate::win::wide;
 use anyhow::{bail, Result};
 use std::mem::{size_of, zeroed};
 use std::ptr::null;

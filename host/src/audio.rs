@@ -7,7 +7,7 @@
 
 use crate::config::Config;
 use crate::proto::{write_frame, T_AFMT, T_PCM};
-use crate::util::wide;
+use crate::win::wide;
 use anyhow::{bail, Result};
 use std::ffi::c_void;
 use std::io::Write;
@@ -586,7 +586,7 @@ impl Drop for EventHandle {
 
 fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool) -> Result<()> {
     let _mmcss = MmcssAudio::register();
-    crate::util::high_qos_current_thread();
+    crate::process::high_qos_current_thread();
     unsafe {
         let activate: unsafe extern "system" fn(
             P,

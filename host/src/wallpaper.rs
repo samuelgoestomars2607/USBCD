@@ -7,7 +7,7 @@
 //! wieder. Der Tablet-Monitor bekommt das Bild des Hauptbildschirms.
 //! Diashow, Windows-Blickpunkt und einfarbige Hintergründe bleiben unangetastet.
 
-use crate::util::wide;
+use crate::win::wide;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::Mutex;

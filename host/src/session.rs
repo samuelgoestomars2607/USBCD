@@ -179,7 +179,7 @@ fn connect_hello(cfg: &Config, launched: bool) -> Result<(TcpStream, Hello)> {
                 ),
             }
         }
-        if crate::util::shutdown() {
+        if crate::state::shutdown() {
             return Err(Disconnected.into());
         }
         if Instant::now() > deadline {
@@ -355,7 +355,7 @@ pub fn run(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Outcome {
 }
 
 fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> {
-    if crate::util::paused() {
+    if crate::state::paused() {
         return Err(Paused.into());
     }
     let mut cleanup = Cleanup {
@@ -574,11 +574,11 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         c
     };
     let bitrate = video::bitrate_for(cfg, sw, sh, fps, codec);
-    crate::util::set_status(&format!(
+    crate::state::set_status(&format!(
         "{}: {name} · {sw}×{sh} · {fps} Hz",
         crate::i18n::tr("Verbunden", "Connected")
     ));
-    crate::util::notify(
+    crate::notify::once(
         "connected",
         crate::i18n::tr("Tablet verbunden", "Tablet connected"),
         &format!(
@@ -626,7 +626,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
             {
                 crate::log!("Dekoder-Prüfung ohne Ergebnis – gleichmäßiger Bildstrom");
                 video::set_probing(false);
-                crate::util::request_reconnect();
+                crate::state::request_reconnect();
             }
         });
     }
@@ -656,11 +656,11 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         {
             return Err(Disconnected.into());
         }
-        crate::util::take_reconnect(); // alte Anfragen verwerfen – diese Übertragung ist frisch
+        crate::state::take_reconnect(); // alte Anfragen verwerfen – diese Übertragung ist frisch
         let started = Instant::now();
         match video::stream(&cur, &params, &mut sock)? {
             StreamEnd::EncoderExited => {
-                if crate::util::windows_ending() {
+                if crate::state::windows_ending() {
                     // Windows hat ffmpeg beim Herunterfahren beendet – nicht neu starten
                     crate::log!("Windows wird beendet – Bildübertragung nicht neu gestartet");
                     return Err(Disconnected.into());
@@ -786,7 +786,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                 );
                 params.bitrate =
                     video::bitrate_for(&cur, params.width, params.height, params.fps, params.codec);
-                crate::util::set_status(&format!(
+                crate::state::set_status(&format!(
                     "{}: {name} · {}×{} · {} Hz",
                     crate::i18n::tr("Verbunden", "Connected"),
                     params.width,
@@ -858,7 +858,7 @@ fn on_decoder_report(p: &[u8]) {
         if let Ok(mut g) = DECODER_FAIL.lock() {
             *g = Some((gen, reason));
         }
-        crate::util::request_reconnect();
+        crate::state::request_reconnect();
         return;
     }
     let Some(prompt) = j.get("prompt").and_then(serde_json::Value::as_bool) else {
@@ -889,11 +889,11 @@ fn on_decoder_report(p: &[u8]) {
         );
         store(prompt);
         video::set_probing(false);
-        crate::util::request_reconnect(); // Prüfung beenden, passende Übertragungsart
+        crate::state::request_reconnect(); // Prüfung beenden, passende Übertragungsart
     } else if !prompt && video::is_sparse() {
         crate::log!("Ein Bild hing im Dekoder – zurück zum gleichmäßigen Bildstrom");
         store(false);
-        crate::util::request_reconnect();
+        crate::state::request_reconnect();
     }
 }
 
@@ -910,7 +910,7 @@ fn on_key_request() {
     }
     *last = Some(Instant::now());
     crate::log!("Tablet braucht ein Schlüsselbild – Encoder neu gestartet");
-    crate::util::request_reconnect();
+    crate::state::request_reconnect();
 }
 
 /// Übertragungsgröße: die in Windows gewählte Auflösung, wenn sie zu den angebotenen
@@ -1051,10 +1051,10 @@ static SLEPT_FOR_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// den adb-Dienst, ohne ein neues Programm zu starten. Höchstens 1,5 s.
 pub fn system_ending_soon(closing_us: bool) {
     use std::sync::atomic::Ordering;
-    if crate::util::windows_ending() {
+    if crate::state::windows_ending() {
         return; // Windows fragt manchmal mehrfach
     }
-    crate::util::set_windows_ending(true);
+    crate::state::set_windows_ending(true);
     if closing_us {
         return;
     }
@@ -1082,15 +1082,15 @@ pub fn system_ending_soon(closing_us: bool) {
 /// Windows fährt jetzt wirklich herunter: Übertragung beenden (das Tablet zeigt dann den
 /// Wartebildschirm, falls es nicht schon aus ist).
 pub fn system_ending() {
-    crate::util::set_windows_ending(true);
-    crate::util::request_end_session();
+    crate::state::set_windows_ending(true);
+    crate::state::request_end_session();
 }
 
 /// Herunterfahren abgebrochen (anderes Programm oder Nutzer): alles läuft weiter, ein
 /// ausgeschaltetes Tablet-Display wieder einschalten.
 pub fn system_ending_cancelled() {
     use std::sync::atomic::Ordering;
-    crate::util::set_windows_ending(false);
+    crate::state::set_windows_ending(false);
     if !SLEPT_FOR_ENDING.swap(false, Ordering::SeqCst) {
         return;
     }
@@ -1121,8 +1121,8 @@ impl PowerWatcher {
         let serial = serial.to_string();
         std::thread::spawn(move || {
             let mut dark = false;
-            while !flag.load(Ordering::Relaxed) && !crate::util::shutdown() {
-                let want = crate::util::pc_dark() && crate::config::current().follow_pc_power;
+            while !flag.load(Ordering::Relaxed) && !crate::state::shutdown() {
+                let want = crate::state::pc_dark() && crate::config::current().follow_pc_power;
                 if want != dark {
                     dark = want;
                     let key = if dark {
@@ -1145,7 +1145,7 @@ impl PowerWatcher {
                 std::thread::sleep(Duration::from_millis(300));
             }
             // Verbindung endet, während das Tablet dunkel ist: nicht dunkel lassen
-            if dark && !crate::util::shutdown() && !crate::util::paused() {
+            if dark && !crate::state::shutdown() && !crate::state::paused() {
                 let _ = adb.on(&serial, &["shell", "input", "keyevent", "KEYCODE_WAKEUP"]);
             }
         });
@@ -1175,7 +1175,7 @@ impl LayoutWatcher {
             let mut last = None;
             let mut size: Option<(u32, u32)> = None;
             let mut waited = 0;
-            while !flag.load(Ordering::Relaxed) && !crate::util::shutdown() {
+            while !flag.load(Ordering::Relaxed) && !crate::state::shutdown() {
                 std::thread::sleep(Duration::from_millis(500));
                 waited += 1;
                 if waited < 10 || waited % 4 != 0 {
@@ -1189,7 +1189,7 @@ impl LayoutWatcher {
                 if last == Some(p) {
                     let now = (p.width, p.height);
                     if size.is_some_and(|s| s != now) {
-                        crate::util::request_reconnect();
+                        crate::state::request_reconnect();
                     }
                     size = Some(now);
                 }

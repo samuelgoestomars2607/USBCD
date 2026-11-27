@@ -1,4 +1,4 @@
-use crate::util::command;
+use crate::process::command;
 use anyhow::{bail, Context, Result};
 
 pub struct Adb {
@@ -13,7 +13,7 @@ pub struct Device {
 
 impl Adb {
     pub fn run(&self, args: &[&str]) -> Result<String> {
-        crate::util::may_spawn()?;
+        crate::process::may_spawn()?;
         let o = command(&self.path).args(args).output().with_context(|| {
             format!(
                 "adb nicht startbar ({}) – Android Platform-Tools installiert?",
@@ -126,8 +126,8 @@ fn track_loop(path: &str, shared: &(std::sync::Mutex<TrackState>, std::sync::Con
             shared.1.notify_all();
         }
     };
-    while !crate::util::shutdown() {
-        if crate::util::windows_ending() {
+    while !crate::state::shutdown() {
+        if crate::state::windows_ending() {
             // beim Herunterfahren adb nicht neu starten (sonst Fehlerfenster 0xc0000142)
             std::thread::sleep(std::time::Duration::from_millis(500));
             continue;
@@ -147,7 +147,7 @@ fn track_loop(path: &str, shared: &(std::sync::Mutex<TrackState>, std::sync::Con
             std::thread::sleep(std::time::Duration::from_secs(5));
             continue;
         };
-        crate::util::bind_to_us(&child);
+        crate::process::bind_to_us(&child);
         if let Some(mut out) = child.stdout.take() {
             loop {
                 // Format: 4 Hex-Ziffern Länge, dann „serial<TAB>state“-Zeilen

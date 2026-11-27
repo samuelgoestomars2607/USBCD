@@ -8,7 +8,7 @@
 //! Klappt die Benachrichtigung nicht (z. B. abgeschaltet), erscheint eine Blase mit
 //! USBCD-Logo.
 
-use crate::util::wide;
+use crate::win::wide;
 use std::ffi::c_void;
 use std::sync::{mpsc, Mutex, OnceLock};
 use windows_sys::core::{GUID, HRESULT, PCWSTR};
@@ -378,6 +378,68 @@ pub fn parse_uri(uri: &str, expected_nonce: &str) -> Option<Action> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+// --- Meldungen mit Sperrzeit (dieselbe Meldung nicht ständig wiederholen) ---
+
+static LAST_NOTE: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// Windows-Benachrichtigung zeigen; dieselbe Meldung (key) höchstens einmal je `cooldown`.
+pub fn once(key: &str, title: &str, text: &str, cooldown: std::time::Duration) {
+    once_with(key, title, text, cooldown, Vec::new());
+}
+
+/// Wie `once`, mit eigenen Knöpfen (Beschriftung, `usbcd:`-Aktion) vor „Log öffnen“.
+pub fn once_with(
+    key: &str,
+    title: &str,
+    text: &str,
+    cooldown: std::time::Duration,
+    mut actions: Vec<(String, String)>,
+) {
+    if let Ok(mut g) = LAST_NOTE.lock() {
+        if let Some((_, t)) = g.iter().find(|(k, _)| k == key) {
+            if t.elapsed() < cooldown {
+                return;
+            }
+        }
+        g.retain(|(k, _)| k != key);
+        g.push((key.to_string(), std::time::Instant::now()));
+    }
+    crate::log!("Hinweis: {title} – {}", text.replace('\n', " "));
+    // Fehler mit Ton und „Log öffnen“, Statusmeldungen leise
+    let problem = matches!(
+        key,
+        "failed"
+            | "installfail"
+            | "ffmpeg"
+            | "helper"
+            | "security"
+            | "camera"
+            | "notextended"
+            | "updatefail"
+    );
+    if problem {
+        actions.push((
+            crate::i18n::tr("Log öffnen", "Open log").to_string(),
+            "log".to_string(),
+        ));
+    }
+    show(Toast {
+        title: title.to_string(),
+        text: text.to_string(),
+        actions,
+        silent: !problem,
+        long: problem,
+    });
+}
+
+/// Sperre einer Meldung aufheben (z. B. nach dem Abziehen), damit sie beim
+/// nächsten Mal wieder erscheint.
+pub fn reset(key: &str) {
+    if let Ok(mut g) = LAST_NOTE.lock() {
+        g.retain(|(k, _)| k != key);
     }
 }
 

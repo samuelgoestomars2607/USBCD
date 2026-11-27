@@ -2,7 +2,7 @@
 //! HKCU\Software\Microsoft\Windows\CurrentVersion\Run\USBCD.
 //! USBCD startet damit ganz normal ohne Administratorrechte.
 
-use crate::util::wide;
+use crate::win::wide;
 use anyhow::{bail, Result};
 use std::ffi::c_void;
 use std::ptr::null_mut;

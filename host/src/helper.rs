@@ -14,7 +14,7 @@
 //! Aufträge von der installierten USBCD.exe an, und USBCD prüft umgekehrt, dass am
 //! anderen Ende wirklich der Dienst sitzt.
 
-use crate::util::wide;
+use crate::win::wide;
 use anyhow::{bail, Context, Result};
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
