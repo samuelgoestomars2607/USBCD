@@ -262,11 +262,8 @@ fn check(on: bool) -> u32 {
     }
 }
 
-unsafe fn show_menu(hwnd: HWND) {
-    let mut pt: POINT = zeroed();
-    GetCursorPos(&mut pt);
-    let cfg = crate::config::current();
-
+/// Untermenü „Bildqualität“.
+unsafe fn quality_menu(cfg: &crate::config::Config) -> HMENU {
     let quality = CreatePopupMenu();
     let max = cfg.quality_max;
     append(
@@ -306,7 +303,11 @@ unsafe fn show_menu(hwnd: HWND) {
             "Lossless still images (exact colours, for powerful PCs)",
         ),
     );
+    quality
+}
 
+/// Untermenü „Stiftdruck“.
+unsafe fn pen_pressure_menu(cfg: &crate::config::Config) -> HMENU {
     let pen = CreatePopupMenu();
     for (i, (curve, label)) in PEN_CURVES
         .iter()
@@ -327,7 +328,11 @@ unsafe fn show_menu(hwnd: HWND) {
             label,
         );
     }
+    pen
+}
 
+/// Untermenü „Seitentaste des Stifts“.
+unsafe fn pen_button_menu(cfg: &crate::config::Config) -> HMENU {
     let pen_btn = CreatePopupMenu();
     for (i, (mode, label)) in PEN_BUTTONS
         .iter()
@@ -347,7 +352,11 @@ unsafe fn show_menu(hwnd: HWND) {
             label,
         );
     }
+    pen_btn
+}
 
+/// Untermenü „Tablet-Helligkeit“.
+unsafe fn brightness_menu(cfg: &crate::config::Config) -> HMENU {
     let bright = CreatePopupMenu();
     for (i, b) in BRIGHTNESS.iter().enumerate() {
         append(
@@ -357,7 +366,12 @@ unsafe fn show_menu(hwnd: HWND) {
             &format!("{b} %"),
         );
     }
+    bright
+}
 
+/// Untermenü „Geräte“: neue zuerst, dann bekannte (Haken = als Bildschirm verwenden).
+/// Merkt sich die Einträge, damit ein Klick dem richtigen Gerät zugeordnet wird.
+unsafe fn devices_menu(cfg: &crate::config::Config) -> HMENU {
     // Geräte: neue zuerst, dann bekannte (Haken = als Bildschirm verwenden)
     let devices = CreatePopupMenu();
     let mut entries = Vec::new();
@@ -408,6 +422,19 @@ unsafe fn show_menu(hwnd: HWND) {
             g.push((serial, name, new_value));
         }
     }
+    devices
+}
+
+unsafe fn show_menu(hwnd: HWND) {
+    let mut pt: POINT = zeroed();
+    GetCursorPos(&mut pt);
+    let cfg = crate::config::current();
+
+    let quality = quality_menu(&cfg);
+    let pen = pen_pressure_menu(&cfg);
+    let pen_btn = pen_button_menu(&cfg);
+    let bright = brightness_menu(&cfg);
+    let devices = devices_menu(&cfg);
 
     let m = CreatePopupMenu();
     append(m, MF_STRING | MF_GRAYED, ID_STATUS, &status());
@@ -757,31 +784,8 @@ fn handle_setting(id: usize) -> bool {
             update(|c| c.tablet_volume_keys = !c.tablet_volume_keys);
             crate::state::mark_settings_dirty();
         }
-        ID_UPDCHECK => {
-            let on = !crate::config::current().update_check;
-            update(|c| c.update_check = on);
-            if on {
-                crate::update::check_now();
-            } else {
-                crate::update::clear();
-            }
-        }
-        ID_WEBCAM => {
-            let on = !crate::config::current().webcam;
-            update(|c| c.webcam = on);
-            crate::camera::set_enabled(on, on);
-            if !on {
-                crate::notify::once(
-                    "camon",
-                    tr("Webcam ausgeschaltet", "Webcam turned off"),
-                    tr(
-                        "Die USBCD-Kamera ist aus Windows entfernt.",
-                        "The USBCD camera has been removed from Windows.",
-                    ),
-                    std::time::Duration::ZERO,
-                );
-            }
-        }
+        ID_UPDCHECK => toggle_update_check(),
+        ID_WEBCAM => toggle_webcam(),
         ID_PAUSE => crate::state::set_paused(!crate::state::paused()),
         i if i >= ID_DEV_BASE => {
             let entry = MENU_DEVICES
@@ -792,47 +796,79 @@ fn handle_setting(id: usize) -> bool {
                 set_device(&serial, &name, use_it);
             }
         }
-        ID_AUTOSTART => {
-            std::thread::spawn(|| {
-                if crate::autostart::enabled() {
-                    crate::autostart::disable();
-                    set_autostart_known(false);
-                    crate::notify::once(
-                        "autostart",
-                        tr("Autostart ausgeschaltet", "Autostart turned off"),
-                        tr(
-                            "USBCD startet nicht mehr automatisch beim Anmelden.",
-                            "USBCD no longer starts automatically at sign-in.",
-                        ),
-                        std::time::Duration::ZERO,
-                    );
-                } else {
-                    match crate::autostart::enable() {
-                        Ok(()) => {
-                            set_autostart_known(true);
-                            crate::notify::once(
-                                "autostart",
-                                tr("Autostart eingeschaltet", "Autostart turned on"),
-                                tr(
-                                    "USBCD startet beim Anmelden automatisch.",
-                                    "USBCD now starts automatically at sign-in.",
-                                ),
-                                std::time::Duration::ZERO,
-                            );
-                        }
-                        Err(e) => crate::notify::once(
-                            "autostart",
-                            tr("Autostart nicht möglich", "Autostart not possible"),
-                            &format!("{e}"),
-                            std::time::Duration::ZERO,
-                        ),
-                    }
-                }
-            });
-        }
+        ID_AUTOSTART => toggle_autostart(),
         _ => return false,
     }
     true
+}
+
+/// „Automatisch nach Updates suchen“ umschalten (eingeschaltet: gleich nachsehen).
+fn toggle_update_check() {
+    let on = !crate::config::current().update_check;
+    crate::config::update(|c| c.update_check = on);
+    if on {
+        crate::update::check_now();
+    } else {
+        crate::update::clear();
+    }
+}
+
+/// Webcam ein-/ausschalten.
+fn toggle_webcam() {
+    let on = !crate::config::current().webcam;
+    crate::config::update(|c| c.webcam = on);
+    crate::camera::set_enabled(on, on);
+    if !on {
+        crate::notify::once(
+            "camon",
+            tr("Webcam ausgeschaltet", "Webcam turned off"),
+            tr(
+                "Die USBCD-Kamera ist aus Windows entfernt.",
+                "The USBCD camera has been removed from Windows.",
+            ),
+            std::time::Duration::ZERO,
+        );
+    }
+}
+
+/// Autostart beim Anmelden umschalten (im Hintergrund – die Registry kann kurz hängen).
+fn toggle_autostart() {
+    std::thread::spawn(|| {
+        if crate::autostart::enabled() {
+            crate::autostart::disable();
+            set_autostart_known(false);
+            crate::notify::once(
+                "autostart",
+                tr("Autostart ausgeschaltet", "Autostart turned off"),
+                tr(
+                    "USBCD startet nicht mehr automatisch beim Anmelden.",
+                    "USBCD no longer starts automatically at sign-in.",
+                ),
+                std::time::Duration::ZERO,
+            );
+        } else {
+            match crate::autostart::enable() {
+                Ok(()) => {
+                    set_autostart_known(true);
+                    crate::notify::once(
+                        "autostart",
+                        tr("Autostart eingeschaltet", "Autostart turned on"),
+                        tr(
+                            "USBCD startet beim Anmelden automatisch.",
+                            "USBCD now starts automatically at sign-in.",
+                        ),
+                        std::time::Duration::ZERO,
+                    );
+                }
+                Err(e) => crate::notify::once(
+                    "autostart",
+                    tr("Autostart nicht möglich", "Autostart not possible"),
+                    &format!("{e}"),
+                    std::time::Duration::ZERO,
+                ),
+            }
+        }
+    });
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -849,26 +885,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_COMMAND => {
-            if handle_setting(wp & 0xFFFF) {
-                return 0;
-            }
-            match wp & 0xFFFF {
-                ID_LAUNCH => crate::state::request_launch(),
-                ID_UPDATE => {
-                    if let Some(r) = crate::update::available() {
-                        crate::update::install(&r.version);
-                    }
-                }
-                ID_SOUND => open("ms-settings:sound"),
-                ID_DISPLAY => open("ms-settings:display"),
-                ID_FOLDER => open(&crate::config::data_dir().to_string_lossy()),
-                ID_ABOUT => show_about(),
-                ID_QUIT => {
-                    set_shutdown();
-                    DestroyWindow(hwnd);
-                }
-                _ => {}
-            }
+            on_command(hwnd, wp & 0xFFFF);
             0
         }
         WM_COPYDATA => {
@@ -884,25 +901,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         WM_POWERBROADCAST => {
-            // PC-Bildschirm an/aus (Windows meldet das auch direkt nach der Anmeldung)
-            const PBT_POWERSETTINGCHANGE: usize = 0x8013;
-            if wp == PBT_POWERSETTINGCHANGE && lp != 0 {
-                use windows_sys::Win32::System::Power::POWERBROADCAST_SETTING;
-                let s = &*(lp as *const POWERBROADCAST_SETTING);
-                let g = s.PowerSetting;
-                let want = windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
-                if g.data1 == want.data1
-                    && g.data2 == want.data2
-                    && g.data3 == want.data3
-                    && g.data4 == want.data4
-                    && s.DataLength >= 4
-                {
-                    // 0 = aus, 1 = an, 2 = gedimmt (gedimmt zählt als an)
-                    let state = std::ptr::read_unaligned(s.Data.as_ptr() as *const u32);
-                    DISPLAY_OFF.store(state == 0, Ordering::Relaxed);
-                    update_dark();
-                }
-            }
+            on_power_broadcast(wp, lp);
             1
         }
         WM_QUERYENDSESSION => {
@@ -981,6 +980,52 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             0
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+/// Menüpunkt gewählt: erst die Einstellungen, dann die übrigen Befehle.
+unsafe fn on_command(hwnd: HWND, id: usize) {
+    if handle_setting(id) {
+        return;
+    }
+    match id {
+        ID_LAUNCH => crate::state::request_launch(),
+        ID_UPDATE => {
+            if let Some(r) = crate::update::available() {
+                crate::update::install(&r.version);
+            }
+        }
+        ID_SOUND => open("ms-settings:sound"),
+        ID_DISPLAY => open("ms-settings:display"),
+        ID_FOLDER => open(&crate::config::data_dir().to_string_lossy()),
+        ID_ABOUT => show_about(),
+        ID_QUIT => {
+            set_shutdown();
+            DestroyWindow(hwnd);
+        }
+        _ => {}
+    }
+}
+
+/// PC-Bildschirm an/aus (Windows meldet das auch direkt nach der Anmeldung).
+unsafe fn on_power_broadcast(wp: WPARAM, lp: LPARAM) {
+    const PBT_POWERSETTINGCHANGE: usize = 0x8013;
+    if wp == PBT_POWERSETTINGCHANGE && lp != 0 {
+        use windows_sys::Win32::System::Power::POWERBROADCAST_SETTING;
+        let s = &*(lp as *const POWERBROADCAST_SETTING);
+        let g = s.PowerSetting;
+        let want = windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
+        if g.data1 == want.data1
+            && g.data2 == want.data2
+            && g.data3 == want.data3
+            && g.data4 == want.data4
+            && s.DataLength >= 4
+        {
+            // 0 = aus, 1 = an, 2 = gedimmt (gedimmt zählt als an)
+            let state = std::ptr::read_unaligned(s.Data.as_ptr() as *const u32);
+            DISPLAY_OFF.store(state == 0, Ordering::Relaxed);
+            update_dark();
+        }
     }
 }
 
