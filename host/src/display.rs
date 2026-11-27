@@ -172,22 +172,8 @@ pub fn render_gpu(device: &str) -> Option<RenderGpu> {
     }
     const IID_IDXGI_FACTORY1: GUID = GUID::from_u128(0x770aae78_f26f_4dba_a829_253c83d1b387);
 
-    /// COM-Zeiger mit Release beim Verlassen
-    struct Com(*mut c_void);
-    impl Com {
-        unsafe fn f<F: Copy>(&self, idx: usize) -> F {
-            let vtbl = *(self.0 as *const *const usize);
-            std::mem::transmute_copy::<usize, F>(&*vtbl.add(idx))
-        }
-    }
-    impl Drop for Com {
-        fn drop(&mut self) {
-            unsafe {
-                let release: unsafe extern "system" fn(*mut c_void) -> u32 = self.f(2);
-                release(self.0);
-            }
-        }
-    }
+    // COM-Zeiger mit Release beim Verlassen (win.rs)
+    use crate::win::ComPtr as Com;
 
     unsafe {
         let mut f: *mut c_void = std::ptr::null_mut();

@@ -21,9 +21,8 @@ use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, LocalFree, ERROR_CALL_NOT_IMPLEMENTED, ERROR_FILE_NOT_FOUND,
-    ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_SERVICE_ALREADY_RUNNING, HANDLE,
-    INVALID_HANDLE_VALUE, NO_ERROR,
+    GetLastError, LocalFree, ERROR_CALL_NOT_IMPLEMENTED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_SERVICE_ALREADY_RUNNING, HANDLE, INVALID_HANDLE_VALUE, NO_ERROR,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -143,14 +142,8 @@ fn execute(cmd: Cmd) -> Result<String> {
 
 // ---------------------------------------------------------------- Handles
 
-struct H(HANDLE);
-impl Drop for H {
-    fn drop(&mut self) {
-        if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-}
+// Handle, das beim Verwerfen geschlossen wird (null/ungültig: nichts zu tun) – win.rs
+use crate::win::Handle as H;
 
 fn read_line(h: HANDLE) -> Result<String> {
     let mut buf = Vec::new();

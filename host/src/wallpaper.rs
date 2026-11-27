@@ -7,7 +7,7 @@
 //! wieder. Der Tablet-Monitor bekommt das Bild des Hauptbildschirms.
 //! Diashow, Windows-Blickpunkt und einfarbige Hintergründe bleiben unangetastet.
 
-use crate::win::wide;
+use crate::win::{wide, ComPtr};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::Mutex;
@@ -30,13 +30,15 @@ pub struct Snapshot {
 
 static LAST: Mutex<Option<Snapshot>> = Mutex::new(None);
 
-struct Wp(*mut c_void);
-impl Wp {
-    unsafe fn f<F: Copy>(&self, idx: usize) -> F {
-        let vtbl = *(self.0 as *const *const usize);
-        let p = *vtbl.add(idx);
-        std::mem::transmute_copy::<usize, F>(&p)
+/// IDesktopWallpaper (COM-Zeiger siehe win.rs).
+struct Wp(ComPtr);
+impl std::ops::Deref for Wp {
+    type Target = ComPtr;
+    fn deref(&self) -> &ComPtr {
+        &self.0
     }
+}
+impl Wp {
     unsafe fn new() -> Option<Wp> {
         let mut p = std::ptr::null_mut();
         let hr = CoCreateInstance(
@@ -46,7 +48,7 @@ impl Wp {
             &IID_IDESKTOP_WALLPAPER,
             &mut p,
         );
-        (hr >= 0 && !p.is_null()).then_some(Wp(p))
+        (hr >= 0 && !p.is_null()).then_some(Wp(ComPtr(p)))
     }
     unsafe fn take(s: PWSTR) -> String {
         if s.is_null() {
@@ -66,18 +68,18 @@ impl Wp {
         let at: unsafe extern "system" fn(*mut c_void, u32, *mut PWSTR) -> HRESULT = self.f(5);
         let rect: unsafe extern "system" fn(*mut c_void, PCWSTR, *mut RECT) -> HRESULT = self.f(7);
         let mut n = 0u32;
-        if count(self.0, &mut n) < 0 {
+        if count(self.0 .0, &mut n) < 0 {
             return Vec::new();
         }
         let mut v = Vec::new();
         for i in 0..n.min(16) {
             let mut p: PWSTR = std::ptr::null_mut();
-            if at(self.0, i, &mut p) >= 0 {
+            if at(self.0 .0, i, &mut p) >= 0 {
                 let id = Self::take(p);
                 let w = wide(&id);
                 let mut r: RECT = std::mem::zeroed();
                 // nur Monitore, die gerade zum Desktop gehören
-                if rect(self.0, w.as_ptr(), &mut r) == 0 && r.right > r.left {
+                if rect(self.0 .0, w.as_ptr(), &mut r) == 0 && r.right > r.left {
                     v.push(id);
                 }
             }
@@ -88,7 +90,7 @@ impl Wp {
         let get: unsafe extern "system" fn(*mut c_void, PCWSTR, *mut PWSTR) -> HRESULT = self.f(4);
         let w = wide(monitor);
         let mut p: PWSTR = std::ptr::null_mut();
-        if get(self.0, w.as_ptr(), &mut p) >= 0 {
+        if get(self.0 .0, w.as_ptr(), &mut p) >= 0 {
             Self::take(p)
         } else {
             String::new()
@@ -97,23 +99,14 @@ impl Wp {
     unsafe fn set(&self, monitor: &str, path: &str) -> bool {
         let set: unsafe extern "system" fn(*mut c_void, PCWSTR, PCWSTR) -> HRESULT = self.f(3);
         let (m, p) = (wide(monitor), wide(path));
-        set(self.0, m.as_ptr(), p.as_ptr()) >= 0
+        set(self.0 .0, m.as_ptr(), p.as_ptr()) >= 0
     }
     unsafe fn slideshow(&self) -> bool {
         let status: unsafe extern "system" fn(*mut c_void, *mut i32) -> HRESULT = self.f(17);
         let mut s = 0i32;
-        status(self.0, &mut s) >= 0 && s & DSS_SLIDESHOW != 0
+        status(self.0 .0, &mut s) >= 0 && s & DSS_SLIDESHOW != 0
     }
 }
-impl Drop for Wp {
-    fn drop(&mut self) {
-        unsafe {
-            let release: unsafe extern "system" fn(*mut c_void) -> u32 = self.f(2);
-            release(self.0);
-        }
-    }
-}
-
 /// In einem eigenen STA-Thread ausführen (Shell-COM).
 fn on_sta<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     std::thread::spawn(move || unsafe {

@@ -68,25 +68,8 @@ const AUDCLNT_STREAMFLAGS_EVENTCALLBACK: u32 = 0x0004_0000;
 const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
 const AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK: i32 = 0x8;
 
-/// Eigentümer eines COM-Zeigers; ruft beim Verwerfen Release() auf.
-struct Com(P);
-impl Com {
-    unsafe fn f<F: Copy>(&self, idx: usize) -> F {
-        let vtbl = *(self.0 as *const *const usize);
-        let p = *vtbl.add(idx);
-        std::mem::transmute_copy::<usize, F>(&p)
-    }
-}
-impl Drop for Com {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                let rel: unsafe extern "system" fn(P) -> u32 = self.f(2);
-                rel(self.0);
-            }
-        }
-    }
-}
+// Eigentümer eines COM-Zeigers (siehe win.rs)
+use crate::win::ComPtr as Com;
 
 fn check(hr: HRESULT, what: &str) -> Result<()> {
     if hr < 0 {
@@ -573,16 +556,8 @@ impl Drop for MmcssAudio {
     }
 }
 
-/// Ereignis für „neue Ton-Daten“ (wird beim Verlassen geschlossen)
-struct EventHandle(*mut c_void);
-
-impl Drop for EventHandle {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
-        }
-    }
-}
+// Ereignis für „neue Ton-Daten“ (wird beim Verlassen geschlossen, win.rs)
+use crate::win::Handle as EventHandle;
 
 fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool) -> Result<()> {
     let _mmcss = MmcssAudio::register();

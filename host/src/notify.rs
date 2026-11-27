@@ -187,30 +187,7 @@ impl Drop for HStr {
 }
 
 /// COM-/WinRT-Zeiger mit Release beim Aufräumen.
-struct Obj(*mut c_void);
-impl Obj {
-    unsafe fn f<F: Copy>(&self, idx: usize) -> F {
-        let vtbl = *(self.0 as *const *const usize);
-        let p = *vtbl.add(idx);
-        std::mem::transmute_copy::<usize, F>(&p)
-    }
-    unsafe fn query(&self, iid: &GUID) -> Option<Obj> {
-        let qi: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT =
-            self.f(0);
-        let mut p = std::ptr::null_mut();
-        (qi(self.0, iid, &mut p) >= 0 && !p.is_null()).then_some(Obj(p))
-    }
-}
-impl Drop for Obj {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                let release: unsafe extern "system" fn(*mut c_void) -> u32 = self.f(2);
-                release(self.0);
-            }
-        }
-    }
-}
+use crate::win::ComPtr as Obj;
 
 type InOut = unsafe extern "system" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> HRESULT;
 type In = unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT;

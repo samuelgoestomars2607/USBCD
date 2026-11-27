@@ -251,33 +251,29 @@ unsafe fn raise_gpu_priority(h: std::os::windows::io::RawHandle) -> Result<Strin
 /// Alle Threads eines angehalten gestarteten Prozesses fortsetzen.
 #[cfg(windows)]
 unsafe fn resume_threads(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use crate::win::Handle;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
     use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
-    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+    let snap = Handle(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+    if !snap.is_valid() {
         return false;
     }
     let mut te: THREADENTRY32 = std::mem::zeroed();
     te.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
     let (mut found, mut ok) = (0, true);
-    let mut more = Thread32First(snap, &mut te) != 0;
+    let mut more = Thread32First(snap.0, &mut te) != 0;
     while more {
         if te.th32OwnerProcessID == pid {
             found += 1;
-            let t = OpenThread(THREAD_SUSPEND_RESUME, 0, te.th32ThreadID);
-            if t.is_null() || ResumeThread(t) == u32::MAX {
+            let t = Handle(OpenThread(THREAD_SUSPEND_RESUME, 0, te.th32ThreadID));
+            if !t.is_valid() || ResumeThread(t.0) == u32::MAX {
                 ok = false;
             }
-            if !t.is_null() {
-                CloseHandle(t);
-            }
         }
-        more = Thread32Next(snap, &mut te) != 0;
+        more = Thread32Next(snap.0, &mut te) != 0;
     }
-    CloseHandle(snap);
     ok && found > 0
 }
 

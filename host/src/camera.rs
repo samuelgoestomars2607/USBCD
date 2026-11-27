@@ -601,11 +601,11 @@ fn manager() {
 
 #[cfg(windows)]
 fn poke_pipe() {
-    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_GENERIC_READ, OPEN_EXISTING};
     let name = crate::win::wide(PIPE_NAME);
-    unsafe {
-        let h = CreateFileW(
+    // nur kurz verbinden – das Handle wird sofort wieder geschlossen
+    let _h = crate::win::Handle(unsafe {
+        CreateFileW(
             name.as_ptr(),
             FILE_GENERIC_READ,
             0,
@@ -613,11 +613,8 @@ fn poke_pipe() {
             OPEN_EXISTING,
             0,
             std::ptr::null_mut(),
-        );
-        if h != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-            CloseHandle(h);
-        }
-    }
+        )
+    });
 }
 
 #[cfg(not(windows))]
