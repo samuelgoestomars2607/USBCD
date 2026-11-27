@@ -157,43 +157,8 @@ pub fn bitrate_for(cfg: &Config, w: u32, h: u32, fps: u32, codec: Codec) -> u64 
 }
 
 pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
-    let cursor = if cfg.capture_cursor { 1 } else { 0 };
-    let src = {
-        format!(
-            "gfxcapture=hmonitor={}:max_framerate={}:capture_cursor={cursor}{}:width={}:height={}:resize_mode=scale_aspect{}{}",
-            p.hmonitor,
-            if p.probe { PROBE_FPS } else { p.fps },
-            // erst ab FFmpeg > 9.0 vorhanden
-            if (p.dup_frames || p.probe) && ffmpeg_has_dup_frames() { ":dup_frames=1" } else { "" },
-            p.width,
-            p.height,
-            // gfxcapture zeichnet jedes Bild mit einem Shader neu und glättet dabei. Bei 1:1
-            // gibt es nichts zu glätten: Punktabtastung ist pixelgleich und billiger. Muss
-            // doch skaliert werden, bleibt es bei der weichen Skalierung.
-            if p.native && gfx_has(&GFX_SCALE_MODE) { ":scale_mode=point" } else { "" },
-            // Desktop ist deckend: Farben so übernehmen, wie Windows sie zusammensetzt
-            // (spart das Zurückrechnen der Transparenz)
-            if gfx_has(&GFX_PREMULT) { ":premultiplied=1" } else { "" }
-        )
-    };
-    // Farben: Umrechnung RGB → YUV und Kennzeichnung im Video müssen zusammenpassen, sonst
-    // nimmt das Tablet eine andere Farbmatrix an (leicht verschobene Farben).
-    // - NVENC rechnet RGB selbst mit BT.601 (begrenzter Bereich) um und kennzeichnet das.
-    // - Intel: Umrechnung ausdrücklich BT.709/begrenzt; vpp_qsv vermerkt das am Bild, der
-    //   Encoder schreibt es dann ins Video (ältere Intel-Laufzeit: wie bisher).
-    // - Software: swscale rechnet mit BT.601/begrenzt → genau das am Bild vermerken.
-    // - AMD: wie bisher (hier nicht testbar).
-    // Bewusst nur am Bild, nicht als Encoder-Option: die würde ffmpeg als Vorgabe in den
-    // Filtergraphen tragen und ggf. eine zusätzliche Umrechnung einbauen.
-    let post = match p.encoder {
-        Encoder::Nvenc | Encoder::Amf => "",
-        Encoder::Qsv => {
-            ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited"
-        }
-        Encoder::Software => {
-            ",hwdownload,format=bgra,format=yuv420p,setparams=colorspace=smpte170m:range=tv"
-        }
-    };
+    let src = capture_source(cfg, p);
+    let post = colour_filter(p.encoder);
     let c = match p.codec {
         Codec::Avc => "h264",
         Codec::Hevc => "hevc",
@@ -224,7 +189,78 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
     // und schiebt sie gesammelt nach – das erzeugte Sekunden an Verzögerung.
     a.extend(["-map", "[v]", "-an", "-fps_mode", "passthrough"].map(String::from));
 
-    let enc: Vec<String> = match p.encoder {
+    let enc = encoder_args(p, c, max);
+    a.push("-c:v".into());
+    a.extend(enc);
+    let nv_cq = max && p.encoder == Encoder::Nvenc;
+    a.extend([
+        "-b:v".into(),
+        // gleichbleibende Qualität: keine Ziel-Datenrate, nur die Obergrenze
+        if nv_cq { "0".into() } else { b.clone() },
+        "-maxrate".into(),
+        b,
+        "-bufsize".into(),
+        buf,
+        "-g".into(),
+        gop,
+        "-f".into(),
+        c.into(),
+        "-flush_packets".into(),
+        "1".into(),
+        "-avioflags".into(),
+        "direct".into(),
+        "pipe:1".into(),
+    ]);
+    a
+}
+
+/// Aufnahme des Tablet-Monitors (gfxcapture-Filter von FFmpeg).
+fn capture_source(cfg: &Config, p: &StreamParams) -> String {
+    let cursor = if cfg.capture_cursor { 1 } else { 0 };
+    format!(
+        "gfxcapture=hmonitor={}:max_framerate={}:capture_cursor={cursor}{}:width={}:height={}:resize_mode=scale_aspect{}{}",
+        p.hmonitor,
+        if p.probe { PROBE_FPS } else { p.fps },
+        // erst ab FFmpeg > 9.0 vorhanden
+        if (p.dup_frames || p.probe) && ffmpeg_has_dup_frames() { ":dup_frames=1" } else { "" },
+        p.width,
+        p.height,
+        // gfxcapture zeichnet jedes Bild mit einem Shader neu und glättet dabei. Bei 1:1
+        // gibt es nichts zu glätten: Punktabtastung ist pixelgleich und billiger. Muss
+        // doch skaliert werden, bleibt es bei der weichen Skalierung.
+        if p.native && gfx_has(&GFX_SCALE_MODE) { ":scale_mode=point" } else { "" },
+        // Desktop ist deckend: Farben so übernehmen, wie Windows sie zusammensetzt
+        // (spart das Zurückrechnen der Transparenz)
+        if gfx_has(&GFX_PREMULT) { ":premultiplied=1" } else { "" }
+    )
+}
+
+/// Farben: Umrechnung RGB → YUV und Kennzeichnung im Video müssen zusammenpassen, sonst
+/// nimmt das Tablet eine andere Farbmatrix an (leicht verschobene Farben).
+/// - NVENC rechnet RGB selbst mit BT.601 (begrenzter Bereich) um und kennzeichnet das.
+/// - Intel: Umrechnung ausdrücklich BT.709/begrenzt; vpp_qsv vermerkt das am Bild, der
+///   Encoder schreibt es dann ins Video (ältere Intel-Laufzeit: wie bisher).
+/// - Software: swscale rechnet mit BT.601/begrenzt → genau das am Bild vermerken.
+/// - AMD: wie bisher (hier nicht testbar).
+///
+/// Bewusst nur am Bild, nicht als Encoder-Option: die würde ffmpeg als Vorgabe in den
+/// Filtergraphen tragen und ggf. eine zusätzliche Umrechnung einbauen.
+fn colour_filter(encoder: Encoder) -> &'static str {
+    match encoder {
+        Encoder::Nvenc | Encoder::Amf => "",
+        Encoder::Qsv => {
+            ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited"
+        }
+        Encoder::Software => {
+            ",hwdownload,format=bgra,format=yuv420p,setparams=colorspace=smpte170m:range=tv"
+        }
+    }
+}
+
+/// Encoder samt Einstellungen für geringe Verzögerung (`c` = h264 oder hevc).
+/// `max`: Bildqualität „Maximal“ (bei NVIDIA gleichbleibende Qualität statt Datenrate).
+fn encoder_args(p: &StreamParams, c: &str, max: bool) -> Vec<String> {
+    match p.encoder {
         Encoder::Nvenc => {
             let mut v = vec![format!("{c}_nvenc"), "-preset".into()];
             if max {
@@ -283,29 +319,7 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
             "-bf".into(),
             "0".into(),
         ],
-    };
-    a.push("-c:v".into());
-    a.extend(enc);
-    let nv_cq = max && p.encoder == Encoder::Nvenc;
-    a.extend([
-        "-b:v".into(),
-        // gleichbleibende Qualität: keine Ziel-Datenrate, nur die Obergrenze
-        if nv_cq { "0".into() } else { b.clone() },
-        "-maxrate".into(),
-        b,
-        "-bufsize".into(),
-        buf,
-        "-g".into(),
-        gop,
-        "-f".into(),
-        c.into(),
-        "-flush_packets".into(),
-        "1".into(),
-        "-avioflags".into(),
-        "direct".into(),
-        "pipe:1".into(),
-    ]);
-    a
+    }
 }
 
 static DUP_FRAMES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
