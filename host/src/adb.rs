@@ -13,6 +13,7 @@ pub struct Device {
 
 impl Adb {
     pub fn run(&self, args: &[&str]) -> Result<String> {
+        crate::util::may_spawn()?;
         let o = command(&self.path).args(args).output().with_context(|| {
             format!(
                 "adb nicht startbar ({}) – Android Platform-Tools installiert?",
@@ -39,6 +40,35 @@ impl Adb {
 
     pub fn devices(&self) -> Result<Vec<Device>> {
         Ok(parse_devices(&self.run(&["devices"])?))
+    }
+
+    /// Shell-Befehl direkt über den laufenden adb-Dienst (Port 5037), ohne ein adb-Programm
+    /// zu starten – funktioniert deshalb auch noch, wenn Windows herunterfährt.
+    pub fn shell_direct(serial: &str, cmd: &str, timeout: std::time::Duration) -> Result<String> {
+        use std::io::{Read, Write};
+        let port = std::env::var("ANDROID_ADB_SERVER_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(5037);
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let mut s = std::net::TcpStream::connect_timeout(&addr, timeout).context("adb-Dienst")?;
+        s.set_read_timeout(Some(timeout))?;
+        s.set_write_timeout(Some(timeout))?;
+        let request = |s: &mut std::net::TcpStream, msg: &str| -> Result<()> {
+            s.write_all(format!("{:04x}{msg}", msg.len()).as_bytes())?;
+            let mut status = [0u8; 4];
+            s.read_exact(&mut status)?;
+            if &status != b"OKAY" {
+                bail!("adb-Dienst lehnt ab: {}", String::from_utf8_lossy(&status));
+            }
+            Ok(())
+        };
+        request(&mut s, &format!("host:transport:{serial}"))?;
+        request(&mut s, &format!("shell:{cmd}"))?;
+        // Ausgabe bis zum Ende lesen: dann ist der Befehl auf dem Tablet fertig
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        Ok(String::from_utf8_lossy(&out).into_owned())
     }
 }
 
@@ -94,6 +124,11 @@ fn track_loop(path: &str, shared: &(std::sync::Mutex<TrackState>, std::sync::Con
         }
     };
     while !crate::util::shutdown() {
+        if crate::util::windows_ending() {
+            // beim Herunterfahren adb nicht neu starten (sonst Fehlerfenster 0xc0000142)
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            continue;
+        }
         // Server zuerst starten – er soll nicht an USBCD gebunden sein
         let _ = Adb { path: path.to_string() }.run(&["start-server"]);
         let child = command(path)

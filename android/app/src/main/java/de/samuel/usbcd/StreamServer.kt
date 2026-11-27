@@ -31,6 +31,8 @@ class StreamServer(
     private val onStill: (ByteArray, Long) -> Unit = { _, _ -> },
     /** Standbild entfernen (neues Videobild, neue Einstellungen, Verbindung beendet) */
     private val onStillHide: () -> Unit = {},
+    /** PC meldet: kein Decoder dieses Tablets kann das Bild anzeigen */
+    private val onUnsupported: () -> Unit = {},
 ) {
     /** Zähler der Videobilder: ein Standbild gilt nur, solange kein neueres kam */
     @Volatile var videoGen = 0L
@@ -135,6 +137,12 @@ class StreamServer(
                         val buf = ByteArray(len)
                         inp.readFully(buf)
                         val c = JSONObject(String(buf))
+                        if (c.optBoolean("unsupported", false)) {
+                            video.stop()
+                            hideStill()
+                            onUnsupported()
+                            continue
+                        }
                         val codec = c.getString("codec")
                         val w = c.getInt("width")
                         val h = c.getInt("height")
@@ -143,7 +151,10 @@ class StreamServer(
                         // erstes Verbinden dieses Tablets: Bild erst nach der Dekoder-Prüfung zeigen
                         val check = c.optBoolean("check", false)
                         hideStill()
-                        if (video.configure(codec, w, h, fps, check)) {
+                        val decoderName = c.optString("decoder", "")
+                        val generation = c.optInt("gen", 0)
+                        val testFail = c.optBoolean("test_fail", false)
+                        if (video.configure(codec, w, h, fps, check, decoderName, generation, testFail)) {
                             Stats.stream = "${codec.uppercase()} · ${w}×${h} · $fps Hz"
                             onState(true, Stats.stream)
                         }

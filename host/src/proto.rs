@@ -129,6 +129,12 @@ pub struct Hello {
     pub refresh: f32,
     pub density_dpi: u32,
     pub codecs: HashMap<String, CodecCaps>,
+    /// Was jeder Decoder bei welcher Größe schafft (ab App 0.6.18; leer = ältere App)
+    pub modes: Vec<crate::ladder::DecoderMode>,
+    /// versionCode der App
+    pub app_version: u64,
+    /// Android-Stand (Build-Fingerabdruck) – nur zum Wiedererkennen, wird nicht gespeichert
+    pub build: String,
 }
 
 impl Hello {
@@ -155,6 +161,29 @@ impl Hello {
             c.max_fps = c.max_fps.clamp(0.0, crate::vdd::MAX_HZ as f32);
             c.name = clean(&c.name);
         }
+        if self.modes.len() > 48 {
+            return Err("zu viele Decoder-Stufen".into());
+        }
+        let (w, h) = (self.width, self.height);
+        self.modes.retain(|m| {
+            matches!(m.codec.as_str(), "hevc" | "avc")
+                && (64..=w).contains(&m.width)
+                && (64..=h).contains(&m.height)
+        });
+        for m in &mut self.modes {
+            if !m.fps.is_finite() {
+                m.fps = 0.0;
+            }
+            m.fps = m.fps.clamp(0.0, crate::vdd::MAX_HZ as f32);
+            // Decoder-Namen: nur Zeichen, die in MediaCodec-Namen vorkommen
+            m.decoder = m
+                .decoder
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+                .take(96)
+                .collect();
+        }
+        self.build = self.build.chars().filter(|c| !c.is_control()).take(200).collect();
         Ok(())
     }
 }
@@ -189,6 +218,24 @@ mod tests {
         h.width = 2000;
         h.refresh = f32::NAN;
         assert!(h.validate().is_err());
+    }
+
+    #[test]
+    fn hello_modes_bounds() {
+        let json = r#"{"width":2000,"height":1200,"refresh":60,"modes":[
+            {"codec":"hevc","decoder":"c2.exynos.hevc.decoder","hw":true,"width":2000,"height":1200,"fps":60},
+            {"codec":"avc","decoder":"c2.android.avc.decoder; rm -rf","hw":false,"width":1000,"height":600,"fps":1e30},
+            {"codec":"vp9","decoder":"x","hw":true,"width":2000,"height":1200,"fps":60},
+            {"codec":"avc","decoder":"x","hw":true,"width":4000,"height":1200,"fps":60}]}"#;
+        let mut h: Hello = serde_json::from_str(json).unwrap();
+        assert!(h.validate().is_ok());
+        assert_eq!(h.modes.len(), 2);
+        assert_eq!(h.modes[1].decoder, "c2.android.avc.decoderrm-rf");
+        assert_eq!(h.modes[1].fps, crate::vdd::MAX_HZ as f32);
+        // ältere App ohne Stufen
+        let mut old: Hello = serde_json::from_str(r#"{"width":2000,"height":1200,"refresh":60}"#).unwrap();
+        assert!(old.validate().is_ok());
+        assert!(old.modes.is_empty());
     }
 
     #[test]

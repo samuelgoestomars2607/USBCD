@@ -93,6 +93,11 @@ pub struct Config {
     /// Diese Version nicht mehr per Benachrichtigung anbieten („Diese Version überspringen“);
     /// im Menü bleibt das Update trotzdem wählbar.
     pub update_skip: String,
+    /// Nur zum Testen (steht nicht in usbcd.toml, solange 0): so viele Übertragungsstufen
+    /// lässt die App absichtlich scheitern – zeigt das Ausweichen auf einem Tablet, das alles
+    /// kann. Dabei wird nichts gemerkt.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub test_decoder_fail: u32,
     /// Bekannte Geräte (Seriennummer → Entscheidung). Unbekannte Geräte werden nie
     /// ungefragt verändert – USBCD fragt erst nach.
     pub devices: std::collections::BTreeMap<String, KnownDevice>,
@@ -109,6 +114,14 @@ pub struct KnownDevice {
     /// (None = noch nicht geprüft; Zeile löschen = beim nächsten Verbinden neu prüfen)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decoder_prompt: Option<bool>,
+    /// Bessere Übertragungsstufen sind auf diesem Tablet gescheitert: hier beginnen
+    /// (gilt für eine App-/Android-Version und höchstens 14 Tage; Zeile löschen = neu probieren)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_fallback: Option<crate::ladder::Fallback>,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 impl Default for Config {
@@ -164,6 +177,7 @@ impl Default for Config {
             sparse_frames: true,
             update_check: true,
             update_skip: String::new(),
+            test_decoder_fail: 0,
             devices: Default::default(),
         }
     }

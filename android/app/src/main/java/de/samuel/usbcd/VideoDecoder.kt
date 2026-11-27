@@ -17,9 +17,23 @@ import android.view.Surface
  */
 class VideoDecoder(
     private val decoders: Map<String, DecoderChoice?>,
+    /** Decoder, die der PC ausdrücklich wählen darf (aus der Liste im HELLO) */
+    private val allowed: Set<String>,
     private val onFirstFrame: () -> Unit,
 ) {
-    private data class Config(val mime: String, val width: Int, val height: Int, val fps: Int)
+    private data class Config(val mime: String, val width: Int, val height: Int, val fps: Int, val decoder: String)
+
+    /** Nummer der Einstellung vom PC; Fehlermeldungen gelten nur für die aktuelle */
+    @Volatile private var gen = 0
+    /** dieser Decoder hat schon ein Bild ausgegeben */
+    @Volatile private var everOutput = false
+    /** nur zum Testen (Einstellung am PC): diese Stufe absichtlich scheitern lassen */
+    @Volatile private var testFail = false
+    /** Scheitern dieses Decoders schon gemeldet */
+    @Volatile private var failReported = false
+    /** erstes Schlüsselbild an diesen Decoder übergeben (nanoTime, 0 = noch nicht) und Bilder seitdem */
+    @Volatile private var firstKeyAt = 0L
+    @Volatile private var framesSinceKey = 0
 
     private val lock = Any()
     private var surface: Surface? = null
@@ -141,9 +155,20 @@ class VideoDecoder(
      * true, wenn sich Codec/Auflösung/Bildrate geändert haben (sonst läuft der Decoder weiter).
      * `check`: erstes Verbinden – Bild erst nach der Dekoder-Prüfung zeigen.
      */
-    fun configure(codecName: String, width: Int, height: Int, fps: Int, check: Boolean = false): Boolean = synchronized(lock) {
+    fun configure(
+        codecName: String,
+        width: Int,
+        height: Int,
+        fps: Int,
+        check: Boolean = false,
+        decoderName: String = "",
+        generation: Int = 0,
+        testFail: Boolean = false,
+    ): Boolean = synchronized(lock) {
         val mime = if (codecName == "hevc") DisplayInfo.MIME_HEVC else DisplayInfo.MIME_AVC
-        val next = Config(mime, width, height, fps)
+        gen = generation
+        this.testFail = testFail
+        val next = Config(mime, width, height, fps, decoderName)
         lastCsd = null
         if (next == config && codec != null) {
             // nur der Encoder am PC wurde neu gestartet (z. B. andere Bildqualität):
@@ -205,11 +230,13 @@ class VideoDecoder(
                 lastCsd?.let { queue(it, it.size, pts, MediaCodec.BUFFER_FLAG_CODEC_CONFIG) }
                 needKey = false
                 outSinceResync = 0
+                if (firstKeyAt == 0L) firstKeyAt = System.nanoTime()
                 synchronized(reveal) {
                     // dieses Schlüsselbild bekommt die nächste Nummer
                     if (reveal.waitKey && reveal.keySeq == 0L) reveal.keySeq = lastSeq + 1
                 }
             }
+            if (firstKeyAt != 0L) framesSinceKey++
             if (!queue(scratch, n, pts, if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)) {
                 // Decoder kommt nicht hinterher → bis zum nächsten Schlüsselbild verwerfen
                 needKey = true
@@ -248,8 +275,31 @@ class VideoDecoder(
         } catch (e: Exception) {
             Log.e(TAG, "queueInputBuffer", e)
             needKey = true
+            if (e is MediaCodec.CodecException && !e.isRecoverable && !e.isTransient) {
+                reportFailed("error ${e.errorCode}")
+            } else if (e is IllegalStateException && !everOutput) {
+                reportFailed("state")
+            }
             false
         }
+    }
+
+    /**
+     * Dieser Decoder kann den Bildstrom nicht anzeigen (lässt sich nicht einrichten, meldet
+     * einen Fehler oder gibt kein einziges Bild aus): dem PC melden, er nimmt die nächste
+     * Stufe (kleiner, anderer Codec oder Software). Je Decoder einmal.
+     */
+    private fun reportFailed(reason: String) {
+        if (failReported) return
+        failReported = true
+        val cfg = config
+        Log.w(TAG, "Decoder scheitert ($reason): $cfg")
+        val j = org.json.JSONObject()
+            .put("failed", reason)
+            .put("gen", gen)
+            .put("width", cfg?.width ?: 0)
+            .put("height", cfg?.height ?: 0)
+        report(Proto.T_DECODER, j.toString().toByteArray())
     }
 
     private fun recreate() {
@@ -258,30 +308,51 @@ class VideoDecoder(
         val s = surface ?: return
         if (!s.isValid) return
         val key = if (cfg.mime == DisplayInfo.MIME_HEVC) "hevc" else "avc"
-        val name = decoders[key]?.name
+        // vom PC gewählter Decoder (nur aus unserer eigenen Liste), sonst der beste Hardware-Decoder
+        val name = cfg.decoder.takeIf { it.isNotEmpty() && it in allowed } ?: decoders[key]?.name
+        failReported = false
+        everOutput = false
+        firstKeyAt = 0L
+        framesSinceKey = 0
+        if (testFail) {
+            reportFailed("test")
+            return
+        }
 
-        val c = try {
-            if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(cfg.mime)
+        var c: MediaCodec? = null
+        try {
+            c = try {
+                if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(cfg.mime)
+            } catch (e: Exception) {
+                Log.e(TAG, "Decoder $name nicht erstellbar, nehme Standard", e)
+                MediaCodec.createDecoderByType(cfg.mime)
+            }
+            // Erst mit allen Latenz-Optionen versuchen, sonst schlicht.
+            val configured = try {
+                c.configure(format(cfg, extended = true), s, null, 0)
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "configure mit Latenz-Optionen fehlgeschlagen, versuche einfach", e)
+                false
+            }
+            if (!configured) {
+                c.reset()
+                c.configure(format(cfg, extended = false), s, null, 0)
+            }
+            // kleinere Auflösung vom PC (gleiches Seitenverhältnis) auf den ganzen Bildschirm ziehen –
+            // das Hochrechnen übernimmt die Hardware des Tablets
+            c.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+            c.start()
         } catch (e: Exception) {
-            Log.e(TAG, "Decoder $name nicht erstellbar, nehme Standard", e)
-            MediaCodec.createDecoderByType(cfg.mime)
+            // diese Größe/dieser Codec geht auf diesem Tablet nicht → PC nimmt die nächste Stufe
+            Log.e(TAG, "Decoder ${name ?: cfg.mime} lässt sich nicht einrichten", e)
+            try {
+                c?.release()
+            } catch (_: Exception) {
+            }
+            reportFailed("configure ${e.javaClass.simpleName}")
+            return
         }
-        // Erst mit allen Latenz-Optionen versuchen, sonst schlicht.
-        val configured = try {
-            c.configure(format(cfg, extended = true), s, null, 0)
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "configure mit Latenz-Optionen fehlgeschlagen, versuche einfach", e)
-            false
-        }
-        if (!configured) {
-            c.reset()
-            c.configure(format(cfg, extended = false), s, null, 0)
-        }
-        // kleinere Auflösung vom PC (gleiches Seitenverhältnis) auf den ganzen Bildschirm ziehen –
-        // das Hochrechnen übernimmt die Hardware des Tablets
-        c.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
-        c.start()
         codec = c
         needKey = true
         synchronized(queuedAt) {
@@ -326,7 +397,9 @@ class VideoDecoder(
             val idx = try {
                 c.dequeueOutputBuffer(info, 10_000)
             } catch (e: Exception) {
-                break // Decoder wurde freigegeben
+                // freigegeben (Umstellung) – oder ein Fehler des noch aktuellen Decoders
+                if (codec === c) reportFailed("output ${e.javaClass.simpleName}")
+                break
             }
             if (idx >= 0) {
                 val q = synchronized(queuedAt) { queuedAt.remove(info.presentationTimeUs) }
@@ -336,6 +409,7 @@ class VideoDecoder(
                     checkPrompt(q)
                 }
                 outSinceResync++
+                everOutput = true
                 Stats.framesShown.incrementAndGet()
                 try {
                     c.releaseOutputBuffer(idx, true) // sofort anzeigen
@@ -357,6 +431,7 @@ class VideoDecoder(
             }
             if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
             if (idx < 0) {
+                checkSilent()
                 checkStuck()
                 maybeReveal() // Wartezeit abgelaufen?
             }
@@ -377,6 +452,18 @@ class VideoDecoder(
             if (probeCount < 10) null else probePrompt >= 9
         }
         if (verdict != null) reportPrompt(verdict)
+    }
+
+    /**
+     * Gibt der Decoder nach dem ersten Schlüsselbild gar nichts aus (2,5 s und mindestens
+     * 5 Bilder später), kann er diesen Strom nicht – typisch für Chips, die eine Größe zwar
+     * annehmen, aber nicht dekodieren. Zählt nur, solange noch nie ein Bild herauskam.
+     */
+    private fun checkSilent() {
+        if (everOutput || failReported) return
+        val since = firstKeyAt
+        if (since == 0L || framesSinceKey < 5) return
+        if (System.nanoTime() - since > 2_500_000_000L) reportFailed("no output")
     }
 
     /**

@@ -12,6 +12,7 @@ mod driver;
 mod helper;
 mod i18n;
 mod input;
+mod ladder;
 mod nal;
 mod notify;
 mod proto;
@@ -117,6 +118,7 @@ fn main() {
     }));
 
     // --- normales Programm (ohne Administratorrechte) ---
+    util::quiet_error_boxes();
     // Echte Pixel-Koordinaten (wichtig für Touch/Stift und Monitorlage bei Skalierung)
     unsafe {
         windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
@@ -384,6 +386,10 @@ fn device_loop(cfg: Config) {
         if util::shutdown() {
             break;
         }
+        if util::windows_ending() {
+            // Herunterfahren: nichts Neues mehr starten, keine Meldungen
+            continue;
+        }
         let list = match tracked.map(Ok).unwrap_or_else(|| adb.devices()) {
             Ok(d) => {
                 adb_error_logged = false;
@@ -431,6 +437,7 @@ fn device_loop(cfg: Config) {
                 "failed",
                 "installfail",
                 "notextended",
+                "unsupported",
             ] {
                 util::reset_notify(k);
             }
@@ -533,6 +540,7 @@ fn device_loop(cfg: Config) {
                                 name: name.clone(),
                                 use_as_display: true,
                                 decoder_prompt: None,
+                                stream_fallback: None,
                             },
                         );
                     });
@@ -733,6 +741,26 @@ fn device_loop(cfg: Config) {
                         )],
                     );
                     st.retry_at = Instant::now() + Duration::from_secs(15);
+                }
+                session::Outcome::Unsupported => {
+                    display_on = true;
+                    display_off(&mut display_on);
+                    st.launch = false; // App zeigt den Hinweis – nicht neu starten
+                    util::set_status(tr(
+                        "Tablet kann das Bild nicht anzeigen",
+                        "Tablet cannot display the picture",
+                    ));
+                    util::notify(
+                        "unsupported",
+                        tr("Tablet kann das Bild nicht anzeigen", "Tablet cannot display the picture"),
+                        tr(
+                            "Kein Decoder dieses Tablets kann das Bild vom PC dekodieren, auch nicht in kleinerer Auflösung. Details: Menü → „Einstellungen und Log öffnen“.",
+                            "None of this tablet's decoders can decode the picture from the PC, not even at a lower resolution. Details: menu → “Open settings and log”.",
+                        ),
+                        Duration::from_secs(300),
+                    );
+                    // erst nach erneutem Anstecken wieder versuchen
+                    st.retry_at = Instant::now() + Duration::from_secs(24 * 3600);
                 }
                 session::Outcome::Failed(e) => {
                     display_on = true;

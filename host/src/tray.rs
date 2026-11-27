@@ -822,11 +822,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             1
         }
-        WM_QUERYENDSESSION => 1,
+        WM_QUERYENDSESSION => {
+            // Herunterfahren/Neustart/Abmelden kündigt sich an: ab jetzt keine
+            // Hilfsprogramme mehr starten (ENDSESSION_CLOSEAPP: nur USBCD wird geschlossen)
+            const ENDSESSION_CLOSEAPP: isize = 0x0000_0001;
+            crate::session::system_ending_soon(lp & ENDSESSION_CLOSEAPP != 0);
+            1
+        }
         WM_ENDSESSION => {
-            // Herunterfahren/Neustart/Abmelden: Tablet nicht mit dem letzten Bild stehen lassen
             if wp != 0 {
                 crate::session::system_ending();
+            } else {
+                crate::session::system_ending_cancelled();
             }
             0
         }
@@ -894,12 +901,14 @@ fn set_device(serial: &str, name: &str, use_it: bool) {
             .map(|d| d.name.clone())
             .unwrap_or_else(|| name.to_string());
         let decoder_prompt = c.devices.get(serial).and_then(|d| d.decoder_prompt);
+        let stream_fallback = c.devices.get(serial).and_then(|d| d.stream_fallback.clone());
         c.devices.insert(
             serial.to_string(),
             crate::config::KnownDevice {
                 name: n,
                 use_as_display: use_it,
                 decoder_prompt,
+                stream_fallback,
             },
         );
     });

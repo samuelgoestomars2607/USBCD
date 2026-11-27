@@ -80,7 +80,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             "hevc" to DisplayInfo.findDecoder(DisplayInfo.MIME_HEVC, w, h),
             "avc" to DisplayInfo.findDecoder(DisplayInfo.MIME_AVC, w, h),
         )
-        Log.i(TAG, "Modus ${mode.modeId}: ${w}x$h @ ${mode.refreshRate} Hz, Decoder: $decoders")
+        val modes = DisplayInfo.decoderModes(w, h)
+        Log.i(TAG, "Modus ${mode.modeId}: ${w}x$h @ ${mode.refreshRate} Hz, Decoder: $decoders, Stufen: $modes")
 
         surfaceView = SurfaceView(this)
         surfaceView.holder.setFixedSize(w, h)
@@ -117,25 +118,38 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         setContentView(root)
         showWaiting()
 
-        val dec = VideoDecoder(decoders) { runOnUiThread { hideOverlay() } }
+        val dec = VideoDecoder(decoders, modes.map { it.name }.toSet()) { runOnUiThread { hideOverlay() } }
         dec.reporter = { type, payload -> server?.send(type, payload) }
         val aud = AudioPlayer(this)
         decoder = dec
         audio = aud
-        val hello = DisplayInfo.helloJson(mode, resources.displayMetrics.densityDpi, decoders, DisplayInfo.deviceName(this))
+        val appVersion = try {
+            packageManager.getPackageInfo(packageName, 0).longVersionCode
+        } catch (e: Exception) {
+            0L
+        }
+        val hello = DisplayInfo.helloJson(
+            mode, resources.displayMetrics.densityDpi, decoders, DisplayInfo.deviceName(this), modes, appVersion,
+        )
         server = StreamServer(
             hello, dec, aud,
             onState = { connected, info ->
                 runOnUiThread {
                     streaming = connected
                     dnd.setActive(connected)
-                    if (connected) showConnecting(info) else showWaiting()
+                    if (connected) {
+                        unsupportedShown = false
+                        showConnecting(info)
+                    } else if (!unsupportedShown) {
+                        showWaiting() // der Hinweis „nicht unterstützt“ bleibt stehen
+                    }
                 }
             },
             onSettings = { s -> runOnUiThread { applySettings(s) } },
             onBlocked = { blocked -> runOnUiThread { if (blocked) showBlocked() else showWaiting() } },
             onCamera = { j -> camera?.control(j) },
             onVolume = { j -> runOnUiThread { showVolume(j) } },
+            onUnsupported = { runOnUiThread { showUnsupported() } },
             onStill = { data, gen -> showStill(data, gen) },
             onStillHide = { runOnUiThread { hideStill() } },
         ).also { it.start() }
@@ -413,6 +427,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
         showOverlay()
         statusView.text = getString(R.string.port_busy)
         detailView.text = getString(R.string.port_busy_detail)
+    }
+
+    /** Hinweis „Bild nicht unterstützt“ steht (bleibt auch nach dem Trennen) */
+    private var unsupportedShown = false
+
+    /** Kein Decoder dieses Tablets kann das Bild anzeigen – klar sagen statt schwarzem Bild. */
+    private fun showUnsupported() {
+        unsupportedShown = true
+        showOverlay()
+        statusView.text = getString(R.string.unsupported)
+        detailView.text = getString(R.string.unsupported_detail)
     }
 
     private fun showConnecting(info: String) {

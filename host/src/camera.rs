@@ -348,6 +348,9 @@ fn decoder_args(rotation: u32) -> Vec<String> {
 }
 
 fn start_decoder(rotation: u32) {
+    if crate::util::windows_ending() {
+        return;
+    }
     let exe = crate::config::current().ffmpeg_exe;
     let child = crate::util::command(&exe)
         .args(decoder_args(rotation))

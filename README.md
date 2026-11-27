@@ -23,7 +23,8 @@ Language: English or German – setup, Windows program and tablet app follow the
 ## Requirements
 
 * Windows 11 (64-bit)
-* Android tablet with Android 8.0 or newer and a USB-C data cable – developed and tested with the Samsung Galaxy Tab S6 Lite
+* Android tablet with Android 8.0 or newer and a USB-C data cable – developed and tested with the Samsung Galaxy Tab S6 Lite.
+  Weaker tablets work too: USBCD adapts resolution and frame rate to what their chip can handle.
 * Recommended: a GPU with a hardware encoder (NVIDIA, AMD or Intel). Without one it falls back to software, which is slower.
 
 ## How it works
@@ -35,9 +36,15 @@ An Android tablet cannot present itself as a monitor on its USB-C port: the port
   ([Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)) with the tablet's resolution
   and refresh rate, captures it with FFmpeg and encodes it on the GPU (NVENC / AMF / QSV). Sound played on
   "USBCD Tablet Speakers" (VB-CABLE) is captured and sent uncompressed.
-* **Tablet app (Kotlin):** picks the highest display mode, reports resolution and decoder capabilities,
-  decodes in hardware with low latency, plays the sound.
+* **Tablet app (Kotlin):** picks the highest display mode, reports its resolution and what each decoder can handle
+  at which size, decodes in hardware with low latency, plays the sound.
 * **Connection:** ADB over the USB cable – no Wi-Fi needed.
+
+If a tablet can't handle its full resolution (e.g. chips that only decode up to 1080p), USBCD streams at the largest
+step it can handle and the tablet scales it up to its display; Windows keeps the full resolution. Priority:
+hardware decoder before software, full frame rate at no less than about 80 % of the edge length, otherwise the
+highest resolution with at least 30 frames/s, otherwise whatever works. If a step fails while running, USBCD moves
+to the next one right away and remembers this for that tablet.
 
 The default sound output is **not** changed. For sound on the tablet, choose "USBCD Tablet Speakers" in Windows.
 
@@ -276,11 +283,19 @@ important details in `diagnose.txt`. The service and the setup log to `C:\Progra
 * **"Security warning: another app … pretends to be USBCD":** check the tablet for unknown apps and restart it.
   The tablet then shows "Connection blocked".
 
-* **No picture / it stops:** try menu → *Picture quality → Data saver*; otherwise `encoder = "software"` in `usbcd.toml`.
+* **No picture / it stops:** try menu → *Picture quality → Data saver*. If the hardware encoder keeps failing to
+  start, USBCD switches to the software encoder by itself (with `encoder = "auto"`); to force it, set
+  `encoder = "software"` in `usbcd.toml`.
 * **Monitor does not appear:** Device Manager → *Display adapters* must list "Virtual Display Driver"
   (intentionally disabled while no tablet is connected).
 * **No sound:** is "USBCD Tablet Speakers" selected in Windows and *Send sound to tablet* on?
 * **App cannot be installed:** follow the notification; uninstall an old app on the tablet if needed.
+* **Tablet shows "Picture not supported":** none of the tablet's decoders could decode the picture, not even at the
+  smallest step. The log shows which steps were tried (lines "Übertragungsstufen" and "Tablet kann … nicht
+  anzeigen") – feel free to report it as an issue.
+* **Picture smaller than the display:** if the log says "Gemerkt: bessere Stufen scheiterten", USBCD starts this
+  tablet at a smaller step. To try again: delete the `stream_fallback` line of the device in `usbcd.toml` (also
+  happens by itself after 14 days or an app/Android update).
 * **Samsung tablet is not detected or the app does not start:** check whether Auto Blocker is on
   (Settings > Security and privacy > Auto Blocker). It blocks USB commands, so turn it off.
 

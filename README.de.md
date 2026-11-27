@@ -23,7 +23,8 @@ Sprache: Deutsch oder Englisch – Setup, Windows-Programm und Tablet-App richte
 ## Voraussetzungen
 
 * Windows 11 (64 Bit)
-* Android-Tablet ab Android 8.0 und ein USB-C-Datenkabel – entwickelt und getestet mit dem Samsung Galaxy Tab S6 Lite
+* Android-Tablet ab Android 8.0 und ein USB-C-Datenkabel – entwickelt und getestet mit dem Samsung Galaxy Tab S6 Lite.
+  Auch schwächere Tablets gehen: USBCD passt Auflösung und Bildrate an das an, was ihr Chip schafft.
 * Empfohlen: Grafikkarte mit Hardware-Encoder (NVIDIA, AMD oder Intel). Ohne läuft es per Software, aber langsamer.
 
 ## Wie es funktioniert
@@ -35,9 +36,15 @@ USB-*Gerät* (MTP, ADB …) und hat keinen Bildeingang. Deshalb gibt es zwei Tei
   Monitor an ([Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)) mit Auflösung und
   Bildrate des Tablets, nimmt ihn mit FFmpeg auf und kodiert auf der Grafikkarte (NVENC / AMF / QSV). Ton, der über
   „USBCD Tablet Lautsprecher“ (VB-CABLE) läuft, wird abgegriffen und unkomprimiert gesendet.
-* **Tablet-App (Kotlin):** wählt den höchsten Display-Modus, meldet Auflösung und Decoder-Fähigkeiten,
-  dekodiert in Hardware mit niedriger Latenz, spielt den Ton ab.
+* **Tablet-App (Kotlin):** wählt den höchsten Display-Modus, meldet Auflösung und was jeder Decoder bei welcher
+  Größe schafft, dekodiert in Hardware mit niedriger Latenz, spielt den Ton ab.
 * **Verbindung:** ADB über das USB-Kabel – kein WLAN nötig.
+
+Schafft ein Tablet die volle Auflösung nicht (z. B. Chips, die nur bis 1080p dekodieren), überträgt USBCD in der
+größten Stufe, die es schafft, und das Tablet rechnet sie auf sein Display hoch; Windows behält die volle Auflösung.
+Vorrang hat: Hardware-Decoder vor Software, volle Bildrate bei höchstens etwa 80 % der Kantenlänge, sonst die höchste
+Auflösung mit mindestens 30 Bildern/s, sonst, was eben geht. Scheitert eine Stufe im Betrieb, nimmt USBCD sofort die
+nächste und merkt sich das für dieses Tablet.
 
 Der Standard-Ausgang für Ton wird **nicht** umgestellt. Für Ton übers Tablet in Windows „USBCD Tablet Lautsprecher“ wählen.
 
@@ -282,11 +289,19 @@ wichtigen Angaben in `diagnose.txt`. Dienst und Setup protokollieren nach `C:\Pr
 * **„Sicherheitswarnung: Eine andere App … gibt sich als USBCD aus“:** Unbekannte Apps auf dem Tablet prüfen und
   das Tablet neu starten. Das Tablet zeigt in diesem Fall „Verbindung blockiert“.
 
-* **Bild kommt nicht / bricht ab:** Menü → *Bildqualität → Sparsam* testen; sonst `encoder = "software"` in `usbcd.toml`.
+* **Bild kommt nicht / bricht ab:** Menü → *Bildqualität → Sparsam* testen. Startet der Hardware-Encoder immer
+  wieder nicht, wechselt USBCD von selbst zum Software-Encoder (bei `encoder = "auto"`); erzwingen lässt er sich mit
+  `encoder = "software"` in `usbcd.toml`.
 * **Monitor erscheint nicht:** Im Geräte-Manager unter *Grafikkarten* muss „Virtual Display Driver“ stehen
   (ohne Tablet absichtlich deaktiviert).
 * **Kein Ton:** Ist in Windows „USBCD Tablet Lautsprecher“ gewählt und *Ton zum Tablet übertragen* an?
 * **App lässt sich nicht installieren:** Meldung beachten; ggf. alte App auf dem Tablet deinstallieren.
+* **Tablet zeigt „Bild wird nicht unterstützt“:** Kein Decoder des Tablets konnte das Bild dekodieren, auch nicht
+  in der kleinsten Stufe. Welche Stufen probiert wurden, steht im Log (Zeilen „Übertragungsstufen“ und „Tablet kann …
+  nicht anzeigen“) – gern als Issue melden.
+* **Bild kleiner als das Display:** Steht im Log „Gemerkt: bessere Stufen scheiterten“, beginnt USBCD bei diesem
+  Tablet mit einer kleineren Stufe. Neu probieren: in `usbcd.toml` beim Gerät die Zeile `stream_fallback` löschen
+  (passiert auch von selbst nach 14 Tagen oder einem App-/Android-Update).
 * **Samsung-Tablet wird nicht erkannt oder die App startet nicht:** Prüfen, ob Auto Blocker an ist
   (Einstellungen > Sicherheit und Datenschutz > Auto Blocker). Er blockiert Befehle über USB, also ausschalten.
 

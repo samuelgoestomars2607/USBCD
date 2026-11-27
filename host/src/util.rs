@@ -130,6 +130,7 @@ pub fn bind_to_us(child: &std::process::Child) {
 /// Parameter“) – sie wird deshalb gleich nach dem Start mehrmals versucht.
 /// Klappt etwas davon nicht, läuft es wie bisher.
 pub fn spawn_stream(cmd: &mut Command, boost: bool) -> std::io::Result<std::process::Child> {
+    may_spawn()?;
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawHandle;
@@ -488,6 +489,43 @@ pub fn pending_devices() -> Vec<(String, String)> {
 }
 
 static END_SESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static WINDOWS_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Windows fährt herunter, startet neu oder meldet ab (ab der Rückfrage an die Programme;
+/// bei Abbruch wieder aus).
+pub fn windows_ending() -> bool {
+    WINDOWS_ENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn set_windows_ending(on: bool) {
+    WINDOWS_ENDING.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Darf jetzt ein Hilfsprogramm (ffmpeg, adb) starten? Beim Herunterfahren nicht mehr:
+/// Neue Prozesse scheitern dann beim Laden (0xc0000142), und Windows zeigt dafür ein
+/// Fehlerfenster.
+pub fn may_spawn() -> std::io::Result<()> {
+    if windows_ending() {
+        Err(std::io::Error::other("Windows wird beendet – kein Programmstart mehr"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Hilfsprogramme sollen nie eigene Fehlerfenster zeigen (Ladefehler, Absturz): Sie laufen
+/// unsichtbar, ihre Fehler landen im Log. Die Kindprozesse erben diese Einstellung.
+pub fn quiet_error_boxes() {
+    #[cfg(windows)]
+    {
+        windows_targets::link!("kernel32.dll" "system" fn SetErrorMode(umode: u32) -> u32);
+        const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+        const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+        const SEM_NOOPENFILEERRORBOX: u32 = 0x8000;
+        unsafe {
+            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        }
+    }
+}
 
 /// Laufende Übertragung beenden (z. B. Gerät auf „nie verwenden“ gestellt).
 pub fn request_end_session() {
