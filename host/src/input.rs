@@ -14,9 +14,18 @@
 use crate::display::{Placement, VirtualDisplay};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::POINT;
-use windows_sys::Win32::UI::Controls::*;
-use windows_sys::Win32::UI::Input::Pointer::*;
-use windows_sys::Win32::UI::WindowsAndMessaging::*;
+use windows_sys::Win32::UI::Controls::{
+    CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, HSYNTHETICPOINTERDEVICE,
+    POINTER_FEEDBACK_DEFAULT, POINTER_TYPE_INFO,
+};
+use windows_sys::Win32::UI::Input::Pointer::{
+    InjectSyntheticPointerInput, POINTER_FLAG_CANCELED, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT,
+    POINTER_FLAG_INRANGE, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_PRESSURE, PEN_MASK_TILT_X,
+    PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, TOUCH_FLAG_NONE, TOUCH_MASK_NONE,
+};
 
 pub const MAX_TOUCH: usize = 10;
 /// Nach dem Stift so lange keine neuen Finger annehmen (Handballen beim Zeichnen).
@@ -256,7 +265,8 @@ pub struct Injector {
     pen_dev: HSYNTHETICPOINTERDEVICE,
     touch_dev: HSYNTHETICPOINTERDEVICE,
     area: Option<Placement>,
-    area_at: Instant,
+    /// Zeitpunkt der letzten Abfrage (None = noch nie)
+    area_at: Option<Instant>,
     pen: Pen,
     button: PenButton,
     pen_seen: Option<Instant>,
@@ -285,7 +295,7 @@ impl Injector {
             pen_dev,
             touch_dev,
             area: None,
-            area_at: Instant::now() - Duration::from_secs(10),
+            area_at: None,
             pen: Pen::default(),
             button: PenButton::new(),
             pen_seen: None,
@@ -301,7 +311,7 @@ impl Injector {
     /// Desktops (nicht des Hauptbildschirms). Liegt das Tablet links vom Hauptmonitor
     /// (x negativ), landeten Eingaben sonst außerhalb und wurden still verworfen.
     fn area(&mut self) -> Option<Placement> {
-        if self.area_at.elapsed() > Duration::from_millis(750) {
+        if self.area_at.is_none_or(|t| t.elapsed() > Duration::from_millis(750)) {
             let (ox, oy) = crate::display::virtual_origin();
             let next = crate::display::current_placement(&self.vd).map(|p| to_virtual(p, ox, oy));
             if next.is_none() && self.area.is_some() {
@@ -319,7 +329,7 @@ impl Injector {
                 }
             }
             self.area = next;
-            self.area_at = Instant::now();
+            self.area_at = Some(Instant::now());
         }
         self.area
     }

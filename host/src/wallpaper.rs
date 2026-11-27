@@ -13,7 +13,10 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 use windows_sys::core::{GUID, HRESULT, PCWSTR, PWSTR};
 use windows_sys::Win32::Foundation::RECT;
-use windows_sys::Win32::System::Com::*;
+use windows_sys::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_APARTMENTTHREADED,
+};
 
 const CLSID_DESKTOP_WALLPAPER: GUID = GUID::from_u128(0xc2cf3110_460e_4fc1_b9d0_8a1c0c9cc4bd);
 const IID_IDESKTOP_WALLPAPER: GUID = GUID::from_u128(0xb92b56a9_8b55_4e14_9a89_0199bbb6f93b);
@@ -125,7 +128,7 @@ fn on_sta<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T
 
 /// Windows-Blickpunkt (Spotlight) als Desktop-Hintergrund?
 fn spotlight() -> bool {
-    use windows_sys::Win32::System::Registry::*;
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     let key = wide(r"Software\Microsoft\Windows\CurrentVersion\DesktopSpotlight\Settings");
     let val = wide("EnabledState");
     let mut v = 0u32;

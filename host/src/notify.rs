@@ -12,7 +12,7 @@ use crate::util::wide;
 use std::ffi::c_void;
 use std::sync::{mpsc, Mutex, OnceLock};
 use windows_sys::core::{GUID, HRESULT, PCWSTR};
-use windows_sys::Win32::System::Registry::*;
+use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
 
 pub const AUMID: &str = "Samuel.USBCD";
 
@@ -120,7 +120,7 @@ fn set_reg(sub: &str, name: Option<&str>, value: &str) {
         RegSetKeyValueW(
             HKEY_CURRENT_USER,
             k.as_ptr(),
-            n.as_ref().map_or(std::ptr::null(), |n| n.as_ptr()),
+            n.as_ref().map_or(std::ptr::null(), std::vec::Vec::as_ptr),
             REG_SZ,
             v.as_ptr() as *const c_void,
             (v.len() * 2) as u32,

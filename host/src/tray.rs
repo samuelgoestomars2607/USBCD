@@ -6,11 +6,25 @@ use crate::util::{set_shutdown, status, wide};
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Shell::*;
-use windows_sys::Win32::UI::WindowsAndMessaging::*;
+use windows_sys::Win32::UI::Shell::{
+    ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_LARGE_ICON,
+    NIIF_NOSOUND, NIIF_USER, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
+    DestroyWindow, DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, LoadIconW, LoadImageW,
+    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SendMessageTimeoutW, SetForegroundWindow, SetTimer, TrackPopupMenu, TranslateMessage, HICON,
+    HMENU, IDI_APPLICATION, IDYES, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, MB_ICONINFORMATION,
+    MB_SETFOREGROUND, MB_YESNO, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
+    SMTO_ABORTIFHUNG, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_APP, WM_COMMAND,
+    WM_CONTEXTMENU, WM_COPYDATA, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONUP, WM_NULL,
+    WM_POWERBROADCAST, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER,
+    WM_WTSSESSION_CHANGE, WNDCLASSW, WS_OVERLAPPED,
+};
 
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_SHOW_INFO: u32 = WM_APP + 2;
@@ -145,7 +159,7 @@ fn show_about() {
         if r == IDYES {
             if let Some(dir) = std::env::current_exe()
                 .ok()
-                .and_then(|e| e.parent().map(|d| d.to_path_buf()))
+                .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
             {
                 for f in ["LICENSE.txt", "THIRD-PARTY.txt"] {
                     let p = dir.join(f);
@@ -659,7 +673,7 @@ unsafe fn wstr_is(p: *const u16, s: &str) -> bool {
 
 /// Nutzt die Taskleiste den dunklen Modus? (fehlt der Eintrag: hell)
 fn system_uses_dark() -> bool {
-    use windows_sys::Win32::System::Registry::*;
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
     let val = wide("SystemUsesLightTheme");
     let mut v = 1u32;

@@ -544,7 +544,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
             "Übertragungsstufen: {}",
             steps
                 .iter()
-                .map(|s| s.label())
+                .map(super::ladder::Step::label)
                 .collect::<Vec<_>>()
                 .join(" → ")
         );
@@ -846,7 +846,10 @@ fn on_decoder_report(p: &[u8]) {
     };
     if let Some(reason) = j.get("failed").and_then(|v| v.as_str()) {
         // diese Stufe geht auf dem Tablet nicht – der Übertragungs-Thread nimmt die nächste
-        let gen = j.get("gen").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let gen = j
+            .get("gen")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32;
         let reason: String = reason
             .chars()
             .filter(|c| !c.is_control())
@@ -858,7 +861,7 @@ fn on_decoder_report(p: &[u8]) {
         crate::util::request_reconnect();
         return;
     }
-    let Some(prompt) = j.get("prompt").and_then(|v| v.as_bool()) else {
+    let Some(prompt) = j.get("prompt").and_then(serde_json::Value::as_bool) else {
         return;
     };
     let Some(serial) = ACTIVE

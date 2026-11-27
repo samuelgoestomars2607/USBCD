@@ -156,7 +156,10 @@ pub const HWID: &str = r"Root\MttVDD";
 fn set_state(enable: bool) -> Result<()> {
     use std::mem::{size_of, zeroed};
     use windows_sys::core::GUID;
-    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::*;
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        SetupDiCallClassInstaller, SetupDiSetClassInstallParamsW, DICS_DISABLE, DICS_ENABLE,
+        DICS_FLAG_GLOBAL, DIF_PROPERTYCHANGE, SP_CLASSINSTALL_HEADER, SP_PROPCHANGE_PARAMS,
+    };
     const GUID_DEVCLASS_DISPLAY: GUID = GUID::from_u128(0x4d36e968_e325_11ce_bfc1_08002be10318);
     let same = |a: &GUID, b: &GUID| {
         a.data1 == b.data1 && a.data2 == b.data2 && a.data3 == b.data3 && a.data4 == b.data4

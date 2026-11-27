@@ -94,7 +94,11 @@ pub fn bind_to_us(child: &std::process::Child) {
     #[cfg(windows)]
     unsafe {
         use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::System::JobObjects::*;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
         static JOB: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
         let job = *JOB.get_or_init(|| {
             let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
@@ -183,7 +187,10 @@ pub fn spawn_stream(cmd: &mut Command, boost: bool) -> std::io::Result<std::proc
 /// Kindprozesse eines unsichtbaren Fensters als „Low“ ein → auf dem Akku sparsamster Takt).
 #[cfg(windows)]
 unsafe fn process_high_qos(h: std::os::windows::io::RawHandle) {
-    use windows_sys::Win32::System::Threading::*;
+    use windows_sys::Win32::System::Threading::{
+        ProcessPowerThrottling, SetProcessInformation, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+    };
     let s = PROCESS_POWER_THROTTLING_STATE {
         Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
         ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
@@ -201,7 +208,11 @@ unsafe fn process_high_qos(h: std::os::windows::io::RawHandle) {
 pub fn high_qos_current_thread() {
     #[cfg(windows)]
     unsafe {
-        use windows_sys::Win32::System::Threading::*;
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadInformation, ThreadPowerThrottling,
+            THREAD_POWER_THROTTLING_CURRENT_VERSION, THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+            THREAD_POWER_THROTTLING_STATE,
+        };
         let s = THREAD_POWER_THROTTLING_STATE {
             Version: THREAD_POWER_THROTTLING_CURRENT_VERSION,
             ControlMask: THREAD_POWER_THROTTLING_EXECUTION_SPEED,
@@ -307,7 +318,9 @@ unsafe fn raise_gpu_priority(h: std::os::windows::io::RawHandle) -> Result<Strin
 #[cfg(windows)]
 unsafe fn resume_threads(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
     use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
     let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if snap == INVALID_HANDLE_VALUE || snap.is_null() {

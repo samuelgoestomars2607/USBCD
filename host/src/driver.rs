@@ -9,7 +9,14 @@ use anyhow::{bail, Result};
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use windows_sys::core::GUID;
-use windows_sys::Win32::Devices::DeviceAndDriverInstallation::*;
+use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+    SetupDiCallClassInstaller, SetupDiCreateDeviceInfoList, SetupDiCreateDeviceInfoW,
+    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
+    SetupDiGetDeviceRegistryPropertyW, SetupDiGetINFClassW, SetupDiSetDeviceRegistryPropertyW,
+    UpdateDriverForPlugAndPlayDevicesW, DICD_GENERATE_ID, DIF_REGISTERDEVICE, DIF_REMOVE,
+    DIGCF_ALLCLASSES, DIGCF_PRESENT, HDEVINFO, INSTALLFLAG_FORCE, SPDRP_HARDWAREID,
+    SP_DEVINFO_DATA,
+};
 
 const MAX_CLASS_NAME_LEN: usize = 32;
 

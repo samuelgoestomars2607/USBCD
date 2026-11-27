@@ -181,7 +181,7 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
 
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "warning", "-nostdin"]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
     // Aufnahme auf dem Grafikchip, der den Tablet-Monitor zeichnet und kodiert –
     // auf Laptops mit zwei Grafikchips muss Windows die Bilder dann nicht hin- und herkopieren
@@ -659,8 +659,10 @@ mod tests {
 
     #[test]
     fn maximum_quality() {
-        let mut cfg = Config::default();
-        cfg.quality_max = true;
+        let mut cfg = Config {
+            quality_max: true,
+            ..Default::default()
+        };
         assert_eq!(bitrate_for(&cfg, 2000, 1200, 60, Codec::Hevc), MAX_BITRATE);
         let mut p = params(None);
         p.bitrate = MAX_BITRATE;

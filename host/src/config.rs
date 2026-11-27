@@ -189,7 +189,7 @@ impl Default for Config {
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -302,7 +302,9 @@ static CURRENT: std::sync::Mutex<Option<Config>> = std::sync::Mutex::new(None);
 
 /// Aktuell gültige Einstellungen (nach Änderungen über das Menü).
 pub fn current() -> Config {
-    let mut g = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = CURRENT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if g.is_none() {
         *g = Some(Config::load());
     }
@@ -310,7 +312,9 @@ pub fn current() -> Config {
 }
 
 pub fn set_current(c: Config) {
-    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(c);
+    *CURRENT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(c);
 }
 
 /// Einstellung ändern und dauerhaft in usbcd.toml speichern.

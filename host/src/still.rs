@@ -135,7 +135,11 @@ pub fn bgrx_to_rgba(bgrx: &[u8]) -> Vec<u8> {
 /// None, wenn der Monitor nicht (mehr) genau diese Größe hat oder Windows nichts liefert.
 #[cfg(windows)]
 fn capture(hmonitor: u64, width: u32, height: u32, cursor: bool) -> Option<Vec<u8>> {
-    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GdiFlush, GetDC,
+        GetMonitorInfoW, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT,
+        DIB_RGB_COLORS, HGDIOBJ, HMONITOR, MONITORINFO, SRCCOPY,
+    };
     unsafe {
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -189,7 +193,9 @@ fn capture(hmonitor: u64, width: u32, height: u32, cursor: bool) -> Option<Vec<u
 #[cfg(windows)]
 unsafe fn draw_cursor(dc: windows_sys::Win32::Graphics::Gdi::HDC, left: i32, top: i32) {
     use windows_sys::Win32::Graphics::Gdi::DeleteObject;
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DrawIconEx, GetCursorInfo, GetIconInfo, CURSORINFO, CURSOR_SHOWING, DI_NORMAL, ICONINFO,
+    };
     let mut ci: CURSORINFO = std::mem::zeroed();
     ci.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
     if GetCursorInfo(&mut ci) == 0 || ci.flags & CURSOR_SHOWING == 0 || ci.hCursor.is_null() {

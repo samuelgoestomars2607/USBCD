@@ -168,7 +168,12 @@ pub fn parse_signed(text: &str) -> Option<Signed> {
 /// ECDSA P-256 / SHA-256 über die Nachricht prüfen – mit Windows-Kryptografie (CNG).
 #[cfg(windows)]
 fn verify_ecdsa(key: &[u8; 64], message: &[u8], signature: &[u8; 64]) -> bool {
-    use windows_sys::Win32::Security::Cryptography::*;
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptCloseAlgorithmProvider, BCryptDestroyKey, BCryptImportKeyPair,
+        BCryptOpenAlgorithmProvider, BCryptVerifySignature, BCRYPT_ALG_HANDLE,
+        BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM, BCRYPT_ECDSA_PUBLIC_P256_MAGIC,
+        BCRYPT_KEY_HANDLE,
+    };
     let hash: [u8; 32] = Sha256::digest(message).into();
     // BCRYPT_ECCPUBLIC_BLOB: Kopf (Magic, Schlüssellänge) + X + Y
     let mut blob = Vec::with_capacity(8 + 64);
@@ -364,7 +369,12 @@ fn https_get(
     limit: usize,
     sink: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
 ) -> Result<(), HttpError> {
-    use windows_sys::Win32::Networking::WinHttp::*;
+    use windows_sys::Win32::Networking::WinHttp::{
+        WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders, WinHttpReadData,
+        WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetTimeouts,
+        INTERNET_DEFAULT_HTTPS_PORT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_FLAG_SECURE,
+        WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
+    };
     let rest = url
         .strip_prefix("https://")
         .ok_or_else(|| anyhow::anyhow!("nur HTTPS erlaubt"))?;
@@ -764,7 +774,9 @@ fn download_and_run(r: &Release) -> anyhow::Result<()> {
 /// Err(true) = Abfrage abgelehnt.
 #[cfg(windows)]
 fn run_setup(setup: &Path) -> Result<(), bool> {
-    use windows_sys::Win32::UI::Shell::*;
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
+    };
     let verb = crate::util::wide("runas");
     let file = crate::util::wide(&setup.to_string_lossy());
     // /SILENT: nur Fortschritt; Aufgaben und Sprache übernimmt Inno von der letzten Installation

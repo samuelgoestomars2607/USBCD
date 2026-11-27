@@ -7,7 +7,10 @@ use anyhow::{bail, Result};
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
-use windows_sys::Win32::System::Registry::*;
+use windows_sys::Win32::System::Registry::{
+    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ,
+    RRF_RT_REG_BINARY, RRF_RT_REG_SZ,
+};
 
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 /// Hier merkt sich Windows, ob ein Autostart im Task-Manager deaktiviert wurde.

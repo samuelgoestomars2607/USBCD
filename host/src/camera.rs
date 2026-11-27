@@ -101,7 +101,10 @@ fn shared() -> &'static Shared {
 }
 
 fn with<R>(f: impl FnOnce(&mut St) -> R) -> R {
-    let mut g = shared().st.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = shared()
+        .st
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let r = f(&mut g);
     drop(g);
     shared().cv.notify_all();
@@ -189,7 +192,7 @@ pub fn on_tablet_state(payload: &[u8]) {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else {
         return;
     };
-    let num = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    let num = |k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
     let state = match v.get("state").and_then(|x| x.as_str()).unwrap_or("") {
         "on" => {
             let (w, h, r) = (num("width"), num("height"), num("rotation"));
@@ -341,7 +344,7 @@ fn decoder_args(rotation: u32) -> Vec<String> {
         "-vf",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .chain([filter(rotation)])
     .chain(
         [
@@ -354,7 +357,7 @@ fn decoder_args(rotation: u32) -> Vec<String> {
             "pipe:1",
         ]
         .iter()
-        .map(|s| s.to_string()),
+        .map(std::string::ToString::to_string),
     )
     .collect()
 }
@@ -513,7 +516,10 @@ fn manager() {
     let mut failed_for = false;
     loop {
         let enabled = {
-            let g = shared().st.lock().unwrap_or_else(|e| e.into_inner());
+            let g = shared()
+                .st
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let have = cam.is_some();
             let (g, _) = shared()
                 .cv
@@ -521,7 +527,7 @@ fn manager() {
                     let todo = s.enabled != have && !(s.enabled && failed_for);
                     !todo && !RETRY.load(Ordering::SeqCst)
                 })
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             g.enabled
         };
         if crate::util::shutdown() {
@@ -699,7 +705,10 @@ fn placeholder_text(t: &TabletCam) -> (&'static str, &'static str) {
 fn pipe_server() {
     use std::ffi::c_void;
     use std::ptr::null_mut;
-    use windows_sys::Win32::Foundation::*;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_PIPE_CONNECTED,
+        INVALID_HANDLE_VALUE,
+    };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
     };
@@ -707,7 +716,10 @@ fn pipe_server() {
     use windows_sys::Win32::Storage::FileSystem::{
         WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_OUTBOUND,
     };
-    use windows_sys::Win32::System::Pipes::*;
+    use windows_sys::Win32::System::Pipes::{
+        ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
+        PIPE_TYPE_BYTE, PIPE_WAIT,
+    };
 
     let sddl = crate::util::wide(PIPE_SDDL);
     let mut sd: *mut c_void = null_mut();
@@ -788,13 +800,16 @@ fn pipe_server() {
             let mut sent = u64::MAX;
             loop {
                 let frame = {
-                    let g = shared().st.lock().unwrap_or_else(|e| e.into_inner());
+                    let g = shared()
+                        .st
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let (mut g, _) = shared()
                         .cv
                         .wait_timeout_while(g, Duration::from_millis(200), |s| {
                             s.seq == sent && s.enabled
                         })
-                        .unwrap_or_else(|e| e.into_inner());
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if !g.enabled || crate::util::shutdown() {
                         break;
                     }
@@ -930,7 +945,13 @@ fn load_fonts() {
 fn draw_text(bgra: &mut [u8], top: i32, status: &str, lines: &[&str]) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW,
+        GdiFlush, SelectObject, SetBkMode, SetTextColor, ANTIALIASED_QUALITY, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
+        DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, FF_SWISS, HFONT,
+        OUT_TT_PRECIS, TRANSPARENT,
+    };
     load_fonts();
     unsafe {
         let dc = CreateCompatibleDC(null_mut());

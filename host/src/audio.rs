@@ -768,7 +768,8 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
         check(start(client.0), "IAudioClient::Start")?;
 
         let mut gain = 1.0f32;
-        let mut last_vol = Instant::now() - Duration::from_secs(1);
+        // None = noch nie abgefragt (Instant minus Dauer kann kurz nach dem Windows-Start scheitern)
+        let mut last_vol: Option<Instant> = None;
         let batch_frames = (rate / 200) as usize; // ~5 ms
         let mut pcm: Vec<u8> = Vec::with_capacity(batch_frames * 4 * 2);
         let bytes_per_sample = (bits / 8) as usize;
@@ -779,8 +780,8 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
                 break Ok(());
             }
             if let Some(v) = &volume {
-                if last_vol.elapsed() > Duration::from_millis(100) {
-                    last_vol = Instant::now();
+                if last_vol.is_none_or(|t| t.elapsed() > Duration::from_millis(100)) {
+                    last_vol = Some(Instant::now());
                     let get_db: unsafe extern "system" fn(P, *mut f32) -> HRESULT = v.f(8);
                     let get_mute: unsafe extern "system" fn(P, *mut i32) -> HRESULT = v.f(15);
                     let (mut db, mut mute) = (0f32, 0i32);

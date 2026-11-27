@@ -348,10 +348,7 @@ fn bundled_app() -> Option<(std::path::PathBuf, u32)> {
 fn installed_app_version(adb: &Adb, serial: &str, pkg: &str) -> Option<u32> {
     let out = adb.on(serial, &["shell", "dumpsys", "package", pkg]).ok()?;
     let i = out.find("versionCode=")? + "versionCode=".len();
-    let digits: String = out[i..]
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    let digits: String = out[i..].chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
 }
 

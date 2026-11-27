@@ -104,10 +104,10 @@ impl Tracker {
     /// `None`: Beobachtung läuft gerade nicht (dann `adb devices` verwenden).
     pub fn wait(&self, seen: &mut u64, timeout: std::time::Duration) -> Option<Vec<Device>> {
         let (m, cv) = &*self.shared;
-        let g = m.lock().unwrap_or_else(|e| e.into_inner());
+        let g = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (g, _) = cv
             .wait_timeout_while(g, timeout, |s| s.generation == *seen)
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *seen = g.generation;
         g.list.clone()
     }
@@ -116,7 +116,10 @@ impl Tracker {
 fn track_loop(path: &str, shared: &(std::sync::Mutex<TrackState>, std::sync::Condvar)) {
     use std::io::Read;
     let set = |list: Option<Vec<Device>>| {
-        let mut g = shared.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = shared
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if g.list != list {
             g.list = list;
             g.generation += 1;

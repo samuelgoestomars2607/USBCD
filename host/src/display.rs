@@ -6,7 +6,14 @@ use anyhow::{bail, Result};
 use std::mem::{size_of, zeroed};
 use std::ptr::null;
 use windows_sys::Win32::Foundation::{BOOL, LPARAM, RECT};
-use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::Graphics::Gdi::{
+    ChangeDisplaySettingsExW, EnumDisplayDevicesW, EnumDisplayMonitors, EnumDisplaySettingsW,
+    GetMonitorInfoW, CDS_NORESET, CDS_UPDATEREGISTRY, DEVMODEW, DISPLAYCONFIG_PATH_ACTIVE,
+    DISPLAYCONFIG_PATH_MODE_IDX_INVALID, DISPLAY_DEVICEW, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
+    DISPLAY_DEVICE_PRIMARY_DEVICE, DISP_CHANGE_SUCCESSFUL, DM_BITSPERPEL, DM_DISPLAYFREQUENCY,
+    DM_PELSHEIGHT, DM_PELSWIDTH, DM_POSITION, ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFO,
+    MONITORINFOEXW,
+};
 
 #[derive(Debug, Clone)]
 pub struct VirtualDisplay {
