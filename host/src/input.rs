@@ -62,11 +62,11 @@ pub enum Event {
 /// Druckkurve des S Pen (0–1024): „weich“ = wenig Kraft für kräftige Striche, „hart“ =
 /// feinere Abstufung bei leichtem Druck. Linear (Standard) bleibt unverändert. Anfang und
 /// Ende bleiben gleich, ein berührender Stift behält immer etwas Druck.
-pub fn pressure_curve(p: u16, curve: &str) -> u16 {
+pub fn pressure_curve(p: u16, curve: PenPressure) -> u16 {
     let exp = match curve {
-        "soft" => 0.6,
-        "hard" => 1.6,
-        _ => return p,
+        PenPressure::Soft => 0.6,
+        PenPressure::Hard => 1.6,
+        PenPressure::Linear => return p,
     };
     if p == 0 {
         return 0;
@@ -87,14 +87,26 @@ pub enum ButtonMode {
     Eraser,
 }
 
-impl ButtonMode {
-    pub fn from_config(s: &str) -> Self {
-        match s {
-            "eraser" => ButtonMode::Eraser,
-            _ => ButtonMode::RightClick,
-        }
-    }
+crate::text_choice!(ButtonMode {
+    RightClick = "right_click",
+    Eraser = "eraser",
+});
+
+/// Druckkurve des S Pen (Menü „Druckempfindlichkeit“, `pen_pressure` in usbcd.toml).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PenPressure {
+    /// weich – wenig Kraft nötig
+    Soft,
+    #[default]
+    Linear,
+    /// hart – feiner bei leichtem Druck
+    Hard,
 }
+crate::text_choice!(PenPressure {
+    Soft = "soft",
+    Linear = "linear",
+    Hard = "hard",
+});
 
 /// Was ein Stift-Ereignis nach der Seitentaste bewirkt.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -733,18 +745,18 @@ mod tests {
 
     #[test]
     fn pressure_curves() {
-        for c in ["linear", "soft", "hard", "unbekannt"] {
+        for c in [PenPressure::Linear, PenPressure::Soft, PenPressure::Hard] {
             assert_eq!(pressure_curve(0, c), 0);
             assert_eq!(pressure_curve(1024, c), 1024);
             assert!(pressure_curve(1, c) >= 1);
         }
-        assert_eq!(pressure_curve(512, "linear"), 512);
-        assert!(pressure_curve(256, "soft") > 256);
-        assert!(pressure_curve(256, "hard") < 256);
+        assert_eq!(pressure_curve(512, PenPressure::Linear), 512);
+        assert!(pressure_curve(256, PenPressure::Soft) > 256);
+        assert!(pressure_curve(256, PenPressure::Hard) < 256);
         // stetig steigend
         let mut last = 0;
         for p in 0..=1024 {
-            let v = pressure_curve(p, "hard");
+            let v = pressure_curve(p, PenPressure::Hard);
             assert!(v >= last);
             last = v;
         }

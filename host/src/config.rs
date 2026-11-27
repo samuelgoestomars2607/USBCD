@@ -1,6 +1,49 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Auswahl-Einstellung, die in `usbcd.toml` als Text steht (z. B. `encoder = "auto"`).
+/// Ein unbekannter Text gilt als Standardwert (wie bisher) und wird im Log vermerkt.
+#[macro_export]
+macro_rules! text_choice {
+    ($name:ident { $($var:ident = $txt:literal),+ $(,)? }) => {
+        impl $name {
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $($name::$var => $txt,)+
+                }
+            }
+        }
+        impl std::str::FromStr for $name {
+            type Err = ();
+            fn from_str(s: &str) -> Result<Self, ()> {
+                match s {
+                    $($txt => Ok($name::$var),)+
+                    _ => Err(()),
+                }
+            }
+        }
+        impl serde::Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.serialize_str(self.as_str())
+            }
+        }
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let text = String::deserialize(d)?;
+                Ok(text.parse().unwrap_or_else(|_| {
+                    let def = $name::default();
+                    $crate::log!(
+                        "Einstellung {:?} unbekannt – nutze {:?}",
+                        text,
+                        def.as_str()
+                    );
+                    def
+                }))
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -19,9 +62,9 @@ pub struct Config {
     pub audio_port: u16,
 
     /// "auto" | "nvenc" | "amf" | "qsv" | "software"
-    pub encoder: String,
+    pub encoder: crate::video::EncoderSetting,
     /// "auto" | "hevc" | "avc"
-    pub codec: String,
+    pub codec: crate::video::CodecSetting,
     /// 0 = automatisch aus Auflösung × Bildrate (Menü „Bildqualität“)
     pub bitrate_mbps: u32,
     /// Bildqualität „Maximal“: gleichbleibende Qualität statt gleichbleibender Datenrate
@@ -38,10 +81,6 @@ pub struct Config {
     /// 0 = keine Begrenzung (Tablet-Maximum)
     pub max_fps: u32,
     pub capture_cursor: bool,
-    /// "gfxcapture" (Standard, FFmpeg ≥ 8) oder "ddagrab"
-    pub capture_method: String,
-    /// nur für ddagrab: DXGI-Ausgangsindex des virtuellen Monitors
-    pub ddagrab_output_idx: u32,
 
     /// Textstücke, an denen der virtuelle Monitor erkannt wird
     pub display_match: Vec<String>,
@@ -57,7 +96,7 @@ pub struct Config {
     /// Lautsprecher in Windows so benennen (leer = nicht umbenennen)
     pub audio_device_rename: String,
     /// "auto" | "manual" | "off" – wie die Windows-Lautstärke angewendet wird
-    pub volume_mode: String,
+    pub volume_mode: crate::audio::VolumeMode,
     /// Aufnahmeseite von VB-CABLE („CABLE Output“) ausblenden, damit Programme den
     /// Tablet-Ton nicht als Mikrofon aufnehmen können
     pub hide_cable_output: bool,
@@ -67,10 +106,10 @@ pub struct Config {
     /// Touch und S Pen am Tablet steuern Windows
     pub tablet_input: bool,
     /// Druckkurve des S Pen: "soft" (weich – wenig Kraft nötig) | "linear" | "hard" (hart)
-    pub pen_pressure: String,
+    pub pen_pressure: crate::input::PenPressure,
     /// Seitentaste des S Pen: "right_click" (Rechtsklick, auch per Klick in der Luft) |
     /// "eraser" (Radierer, solange gedrückt)
-    pub pen_button: String,
+    pub pen_button: crate::input::ButtonMode,
     /// Info-Anzeige (Bilder/s, Datenrate, Laufzeiten) auf dem Tablet
     pub show_stats: bool,
     /// Tablet-Display aus, wenn der PC-Bildschirm ausgeht oder der PC gesperrt wird
@@ -134,8 +173,8 @@ impl Default for Config {
             android_package: "de.samuel.usbcd".into(),
             video_port: 27183,
             audio_port: 27184,
-            encoder: "auto".into(),
-            codec: "auto".into(),
+            encoder: Default::default(),
+            codec: Default::default(),
             bitrate_mbps: 0,
             quality_max: false,
             stream_priority: true,
@@ -143,8 +182,6 @@ impl Default for Config {
             tablet_brightness: 100,
             max_fps: 0,
             capture_cursor: true,
-            capture_method: "gfxcapture".into(),
-            ddagrab_output_idx: 1,
             display_match: vec![
                 "Virtual Display Driver".into(),
                 "MttVDD".into(),
@@ -166,12 +203,12 @@ impl Default for Config {
                 "USBCD Tablet Speakers",
             )
             .into(),
-            volume_mode: "auto".into(),
+            volume_mode: Default::default(),
             hide_cable_output: true,
             display_position: None,
             tablet_input: true,
-            pen_pressure: "linear".into(),
-            pen_button: "right_click".into(),
+            pen_pressure: Default::default(),
+            pen_button: Default::default(),
             show_stats: false,
             follow_pc_power: true,
             webcam: false,
@@ -380,12 +417,32 @@ mod tests {
              volume_mode = \"manual\"\nunbekannter_eintrag = 1\n\n[devices.R52N123]\nname = \"Tab\"\nuse = true\n",
         )
         .unwrap();
-        assert_eq!(old.encoder, "nvenc");
-        assert_eq!(old.codec, "avc");
-        assert_eq!(old.pen_pressure, "soft");
-        assert_eq!(old.pen_button, "eraser");
-        assert_eq!(old.volume_mode, "manual");
+        assert_eq!(old.encoder, crate::video::EncoderSetting::Nvenc);
+        assert_eq!(old.codec, crate::video::CodecSetting::Avc);
+        assert_eq!(old.pen_pressure, crate::input::PenPressure::Soft);
+        assert_eq!(old.pen_button, crate::input::ButtonMode::Eraser);
+        assert_eq!(old.volume_mode, crate::audio::VolumeMode::Manual);
         assert_eq!(old.video_port, 27183);
         assert!(old.devices["R52N123"].use_as_display);
+        // entfernte Einträge (früher: ddagrab) stören nicht
+        let old: super::Config =
+            toml::from_str("capture_method = \"ddagrab\"\nddagrab_output_idx = 2\n").unwrap();
+        assert_eq!(old.video_port, 27183);
+    }
+
+    /// Unbekannte Auswahlwerte gelten als Standard – der Rest der Datei bleibt gültig.
+    #[test]
+    fn unknown_choices_fall_back() {
+        let c: super::Config = toml::from_str(
+            "encoder = \"turbo\"\ncodec = \"vp9\"\nvolume_mode = \"laut\"\n\
+             pen_pressure = \"mittel\"\npen_button = \"links\"\nmax_fps = 30\n",
+        )
+        .unwrap();
+        assert_eq!(c.encoder, crate::video::EncoderSetting::Auto);
+        assert_eq!(c.codec, crate::video::CodecSetting::Auto);
+        assert_eq!(c.volume_mode, crate::audio::VolumeMode::Auto);
+        assert_eq!(c.pen_pressure, crate::input::PenPressure::Linear);
+        assert_eq!(c.pen_button, crate::input::ButtonMode::RightClick);
+        assert_eq!(c.max_fps, 30);
     }
 }

@@ -71,6 +71,23 @@ const AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK: i32 = 0x8;
 // Eigentümer eines COM-Zeigers (siehe win.rs)
 use crate::win::ComPtr as Com;
 
+/// Wie die Windows-Lautstärke auf den Tablet-Ton wirkt (`volume_mode` in usbcd.toml).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VolumeMode {
+    /// Windows rechnet die Lautstärke selbst ein (wenn möglich), sonst USBCD
+    #[default]
+    Auto,
+    /// USBCD rechnet die Lautstärke immer selbst ein
+    Manual,
+    /// Lautstärke wird nicht angewendet
+    Off,
+}
+crate::text_choice!(VolumeMode {
+    Auto = "auto",
+    Manual = "manual",
+    Off = "off",
+});
+
 fn check(hr: HRESULT, what: &str) -> Result<()> {
     if hr < 0 {
         bail!("{what} fehlgeschlagen (HRESULT 0x{:08X})", hr as u32);
@@ -584,7 +601,7 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
         ) >= 0
         {
             let c = Com(p);
-            if cfg.volume_mode == "auto" {
+            if cfg.volume_mode == VolumeMode::Auto {
                 #[repr(C)]
                 struct Props {
                     cb: u32,
@@ -616,10 +633,10 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
             Com(p)
         };
 
-        let manual_volume = match cfg.volume_mode.as_str() {
-            "off" => false,
-            "manual" => true,
-            _ => !post_volume,
+        let manual_volume = match cfg.volume_mode {
+            VolumeMode::Off => false,
+            VolumeMode::Manual => true,
+            VolumeMode::Auto => !post_volume,
         };
         let volume = if manual_volume {
             let mut v: P = std::ptr::null_mut();
@@ -863,7 +880,7 @@ pub fn volume_key(p: &[u8]) {
         return;
     }
     let c = crate::config::current();
-    if !(c.tablet_volume_keys && c.audio_enabled && c.volume_mode != "off") {
+    if !(c.tablet_volume_keys && c.audio_enabled && c.volume_mode != VolumeMode::Off) {
         return;
     }
     let Ok(mut g) = VOLUME_TX.lock() else { return };

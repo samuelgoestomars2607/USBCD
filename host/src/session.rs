@@ -11,7 +11,7 @@ use crate::i18n::tr;
 use crate::ladder::{self, Step};
 use crate::nal::Codec;
 use crate::proto::{read_frame_max, write_frame, Hello, T_CONFIG, T_HELLO};
-use crate::video::{self, Encoder, StreamEnd, StreamParams};
+use crate::video::{self, CodecSetting, Encoder, StreamEnd, StreamParams};
 use anyhow::{bail, Context, Result};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -225,10 +225,10 @@ fn start_app(cfg: &Config, adb: &Adb, serial: &str) -> Result<()> {
 /// Wählt Codec und Bildrate anhand der Decoder-Fähigkeiten des Tablets.
 pub fn choose(cfg: &Config, hello: &Hello, enc: Encoder) -> (Codec, u32) {
     let target = target_fps(cfg, hello);
-    let order: Vec<Codec> = match (cfg.codec.as_str(), enc) {
-        ("hevc", _) => vec![Codec::Hevc],
-        ("avc", _) | (_, Encoder::Software) => vec![Codec::Avc],
-        _ => vec![Codec::Hevc, Codec::Avc],
+    let order: Vec<Codec> = match (cfg.codec, enc) {
+        (CodecSetting::Hevc, _) => vec![Codec::Hevc],
+        (CodecSetting::Avc, _) | (_, Encoder::Software) => vec![Codec::Avc],
+        (CodecSetting::Auto, _) => vec![Codec::Hevc, Codec::Avc],
     };
     let caps = |c: Codec| hello.codecs.get(c.name()).cloned().unwrap_or_default();
     // 1. Codec, der die volle Bildrate schafft
@@ -274,9 +274,9 @@ pub fn plan(cfg: &Config, hello: &Hello, enc: Encoder) -> Vec<Step> {
     let lim = ladder::Limits {
         native: (hello.width, hello.height),
         target_fps: target_fps(cfg, hello),
-        allow_hevc: cfg.codec != "avc" && !software,
-        allow_avc: cfg.codec != "hevc" || software,
-        prefer_avc: cfg.codec == "avc",
+        allow_hevc: cfg.codec != CodecSetting::Avc && !software,
+        allow_avc: cfg.codec != CodecSetting::Hevc || software,
+        prefer_avc: cfg.codec == CodecSetting::Avc,
     };
     let steps = if hello.modes.is_empty() {
         Vec::new()
@@ -693,7 +693,10 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                 }
                 // Hardware-Encoder startet immer wieder nicht → Software-Encoder (nur bei
                 // encoder = "auto"; kann nur H.264, deshalb Stufen neu bestimmen)
-                if restarts >= 4 && params.encoder != Encoder::Software && cur.encoder == "auto" {
+                if restarts >= 4
+                    && params.encoder != Encoder::Software
+                    && cur.encoder == crate::video::EncoderSetting::Auto
+                {
                     params.encoder = Encoder::Software;
                     params.capture_gpu = None;
                     steps = plan(&cur, &hello, Encoder::Software);
@@ -984,13 +987,11 @@ impl InputReader {
                         if let Some(mut ev) = crate::input::parse(&p) {
                             if let crate::input::Event::Pen(pen) = &mut ev {
                                 pen.pressure =
-                                    crate::input::pressure_curve(pen.pressure, &c.pen_pressure);
+                                    crate::input::pressure_curve(pen.pressure, c.pen_pressure);
                             }
                             let inj = injector
                                 .get_or_insert_with(|| crate::input::Injector::new(vd.clone()));
-                            inj.set_button_mode(crate::input::ButtonMode::from_config(
-                                &c.pen_button,
-                            ));
+                            inj.set_button_mode(c.pen_button);
                             inj.handle(ev);
                         }
                     }

@@ -1,7 +1,9 @@
 //! Symbol im Infobereich der Taskleiste mit Menü.
 //! Läuft im Hauptthread; die Tablet-Erkennung arbeitet in einem eigenen Thread.
 
+use crate::audio::VolumeMode;
 use crate::i18n::tr;
+use crate::input::{ButtonMode, PenPressure};
 use crate::state::set_shutdown;
 use crate::state::status;
 use crate::win::wide;
@@ -198,9 +200,9 @@ const ID_Q_HIGH: usize = 22;
 const ID_Q_MAX: usize = 23;
 const ID_STILLS: usize = 24;
 const ID_PEN_BASE: usize = 60; // 60..=62 → weich/linear/hart
-const PEN_CURVES: [&str; 3] = ["soft", "linear", "hard"];
+const PEN_CURVES: [PenPressure; 3] = [PenPressure::Soft, PenPressure::Linear, PenPressure::Hard];
 const ID_PENBTN_BASE: usize = 64; // 64..=65 → Rechtsklick/Radierer
-const PEN_BUTTONS: [&str; 2] = ["right_click", "eraser"];
+const PEN_BUTTONS: [ButtonMode; 2] = [ButtonMode::RightClick, ButtonMode::Eraser];
 const ID_B_BASE: usize = 30; // 30..=33 → 100/75/50/25 %
 const BRIGHTNESS: [u32; 4] = [100, 75, 50, 25];
 const ID_AUTOSTART: usize = 40;
@@ -489,7 +491,7 @@ unsafe fn show_menu(hwnd: HWND) {
         ),
     );
     // wirkt nur, wenn der Ton zum Tablet geht
-    let volkeys_flags = if cfg.audio_enabled && cfg.volume_mode != "off" {
+    let volkeys_flags = if cfg.audio_enabled && cfg.volume_mode != VolumeMode::Off {
         check(cfg.tablet_volume_keys)
     } else {
         check(cfg.tablet_volume_keys) | MF_GRAYED
@@ -727,11 +729,11 @@ fn handle_setting(id: usize) -> bool {
         }
         i if (ID_PEN_BASE..ID_PEN_BASE + PEN_CURVES.len()).contains(&i) => {
             let curve = PEN_CURVES[i - ID_PEN_BASE];
-            update(|c| c.pen_pressure = curve.into());
+            update(|c| c.pen_pressure = curve);
         }
         i if (ID_PENBTN_BASE..ID_PENBTN_BASE + PEN_BUTTONS.len()).contains(&i) => {
             let mode = PEN_BUTTONS[i - ID_PENBTN_BASE];
-            update(|c| c.pen_button = mode.into());
+            update(|c| c.pen_button = mode);
         }
         i if (ID_B_BASE..ID_B_BASE + BRIGHTNESS.len()).contains(&i) => {
             let b = BRIGHTNESS[i - ID_B_BASE];

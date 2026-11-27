@@ -33,12 +33,12 @@ impl Encoder {
     }
 
     pub fn pick(cfg: &Config, vendor: GpuVendor) -> Encoder {
-        match cfg.encoder.as_str() {
-            "nvenc" => Encoder::Nvenc,
-            "amf" => Encoder::Amf,
-            "qsv" => Encoder::Qsv,
-            "software" => Encoder::Software,
-            _ => match vendor {
+        match cfg.encoder {
+            EncoderSetting::Nvenc => Encoder::Nvenc,
+            EncoderSetting::Amf => Encoder::Amf,
+            EncoderSetting::Qsv => Encoder::Qsv,
+            EncoderSetting::Software => Encoder::Software,
+            EncoderSetting::Auto => match vendor {
                 GpuVendor::Nvidia => Encoder::Nvenc,
                 GpuVendor::Amd => Encoder::Amf,
                 GpuVendor::Intel => Encoder::Qsv,
@@ -47,6 +47,38 @@ impl Encoder {
         }
     }
 }
+
+/// Encoder-Einstellung (`encoder` in usbcd.toml): automatisch nach Grafikchip oder fest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EncoderSetting {
+    #[default]
+    Auto,
+    Nvenc,
+    Amf,
+    Qsv,
+    Software,
+}
+crate::text_choice!(EncoderSetting {
+    Auto = "auto",
+    Nvenc = "nvenc",
+    Amf = "amf",
+    Qsv = "qsv",
+    Software = "software",
+});
+
+/// Codec-Einstellung (`codec` in usbcd.toml): automatisch (HEVC vor H.264) oder fest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodecSetting {
+    #[default]
+    Auto,
+    Hevc,
+    Avc,
+}
+crate::text_choice!(CodecSetting {
+    Auto = "auto",
+    Hevc = "hevc",
+    Avc = "avc",
+});
 
 pub struct StreamParams {
     pub hmonitor: u64,
@@ -126,12 +158,7 @@ pub fn bitrate_for(cfg: &Config, w: u32, h: u32, fps: u32, codec: Codec) -> u64 
 
 pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
     let cursor = if cfg.capture_cursor { 1 } else { 0 };
-    let src = if cfg.capture_method == "ddagrab" {
-        format!(
-            "ddagrab=output_idx={}:framerate={}:draw_mouse={cursor}",
-            cfg.ddagrab_output_idx, p.fps
-        )
-    } else {
+    let src = {
         format!(
             "gfxcapture=hmonitor={}:max_framerate={}:capture_cursor={cursor}{}:width={}:height={}:resize_mode=scale_aspect{}{}",
             p.hmonitor,
@@ -185,7 +212,7 @@ pub fn ffmpeg_args(cfg: &Config, p: &StreamParams) -> Vec<String> {
         .collect();
     // Aufnahme auf dem Grafikchip, der den Tablet-Monitor zeichnet und kodiert –
     // auf Laptops mit zwei Grafikchips muss Windows die Bilder dann nicht hin- und herkopieren
-    if let (Some(v), false) = (p.capture_gpu, cfg.capture_method == "ddagrab") {
+    if let Some(v) = p.capture_gpu {
         a.push("-init_hw_device".into());
         a.push(format!("d3d11va=usbcd:,vendor_id=0x{v:04x}"));
         a.push("-filter_hw_device".into());
@@ -329,7 +356,7 @@ pub fn send_settings(sock: &mut TcpStream) -> std::io::Result<()> {
         "stats": c.show_stats,
         "dnd": c.tablet_dnd,
         // nur, wenn der Windows-Regler den Tablet-Ton auch wirklich beeinflusst
-        "volume_keys": c.tablet_volume_keys && c.audio_enabled && c.volume_mode != "off",
+        "volume_keys": c.tablet_volume_keys && c.audio_enabled && c.volume_mode != crate::audio::VolumeMode::Off,
     })
     .to_string();
     crate::proto::write_frame(sock, crate::proto::T_SETTINGS, j.as_bytes())

@@ -223,13 +223,12 @@ fn prepare(cfg: &Config) {
     log!("adb: {} | ffmpeg: {}", cfg.adb_exe, cfg.ffmpeg_exe);
     match video::check_ffmpeg(&cfg.ffmpeg_exe) {
         Ok(true) => {}
-        Ok(false) if cfg.capture_method != "ddagrab" => notify::once(
+        Ok(false) => notify::once(
             "ffmpeg",
             tr("USBCD: Bildübertragung nicht möglich", "USBCD: cannot transmit the picture"),
             tr("Die mitgelieferte FFmpeg-Version ist zu alt. Bitte das USBCD-Setup neu bauen und installieren.", "The bundled FFmpeg version is too old. Please rebuild and reinstall the USBCD setup."),
             Duration::from_secs(3600),
         ),
-        Ok(false) => {}
         Err(e) => notify::once(
             "ffmpeg",
             tr("USBCD: Bildübertragung nicht möglich", "USBCD: cannot transmit the picture"),
