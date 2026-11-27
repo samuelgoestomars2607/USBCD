@@ -11,8 +11,8 @@ android {
         applicationId = "de.samuel.usbcd"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.6.19"
+        versionCode = 24
+        versionName = "0.6.20"
     }
 
     // Eigener Release-Schlüssel – legt installer\build-installer.ps1 beim ersten Bauen an
