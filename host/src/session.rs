@@ -365,24 +365,7 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         display_on: false,
     };
 
-    for port in [cfg.video_port, cfg.audio_port] {
-        adb.on(
-            serial,
-            &["forward", &format!("tcp:{port}"), &format!("tcp:{port}")],
-        )?;
-    }
-    if launch {
-        start_app(cfg, adb, serial)?;
-    }
-
-    let (mut sock, hello) = match connect_hello(cfg, launch) {
-        Err(e) if e.downcast_ref::<NeedsToken>().is_some() => {
-            crate::log!("Tablet-App kennt das Sitzungsgeheimnis nicht – wird damit neu gestartet");
-            start_app(cfg, adb, serial)?;
-            connect_hello(cfg, true)?
-        }
-        r => r?,
-    };
+    let (mut sock, hello) = connect(cfg, adb, serial, launch)?;
     let name = if hello.name.trim().is_empty() {
         hello.model.clone()
     } else {
@@ -410,6 +393,221 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
     }
     cleanup.display_on = true;
 
+    let (vd, hmon) = attach_monitor(cfg, w, h, hz)?;
+    if let Some((mw, mh, mhz)) = display::mode_of(&vd.device_name) {
+        crate::log!("Windows-Modus des Tablet-Monitors: {mw}x{mh} @ {mhz} Hz");
+    }
+    // in der Windows-Auflösung übertragen; ist sie kleiner, rechnet das Tablet hoch
+    let (sw, sh) = stream_size(&vd.device_name, w, h, hz);
+    if (sw, sh) != (w, h) {
+        crate::log!("Übertragung in {sw}x{sh}, das Tablet rechnet auf {w}x{h} hoch");
+    }
+
+    // Windows verliert bei neuen Monitoren gern das Hintergrundbild → wiederherstellen
+    crate::wallpaper::restore_later();
+    // Position merken, wenn der Nutzer den Monitor verschiebt
+    let _layout = LayoutWatcher::start(vd.clone());
+    // Touch/Stift vom Tablet annehmen, Laufzeit messen
+    let _input = InputReader::start(&sock, vd.clone())?;
+    // Tablet-Display mit dem PC-Bildschirm aus- und einschalten
+    let _power = PowerWatcher::start(adb, serial);
+    let _active = ActiveDevice::set(adb, serial);
+
+    // --- Ton ---
+    let audio = if cfg.audio_enabled {
+        Some(AudioSession::start(cfg))
+    } else {
+        None
+    };
+
+    // --- Video ---
+    // Encoder des Grafikchips, der den Tablet-Monitor zeichnet (Laptops mit zwei Chips);
+    // unbekannt → wie bisher der Chip des Hauptbildschirms
+    let (encoder, fallback_encoder, capture_gpu) = pick_encoder(cfg, &vd);
+    // Übertragungsstufen: beste zuerst; scheitert eine auf dem Tablet, kommt die nächste
+    let sig = ladder::signature(hello.app_version, &hello.build);
+    let steps = plan(cfg, &hello, encoder);
+    let remembered = cfg
+        .devices
+        .get(serial)
+        .and_then(|d| d.stream_fallback.clone());
+    let Some(idx) = ladder::start_index(&steps, remembered.as_ref(), &sig, unix_now()) else {
+        crate::log!("Gemerkt: dieses Tablet kann das Bild nicht dekodieren (Zeile stream_fallback in usbcd.toml löschen = neu probieren)");
+        send_unsupported(&mut sock);
+        return Err(Unsupported.into());
+    };
+    if remembered.is_some() && idx == 0 {
+        forget_fallback(serial); // neue App-/Android-Version oder lange her: neu lernen
+    }
+    if steps.len() > 1 {
+        crate::log!(
+            "Übertragungsstufen: {}",
+            steps
+                .iter()
+                .map(super::ladder::Step::label)
+                .collect::<Vec<_>>()
+                .join(" → ")
+        );
+    }
+    if idx > 0 {
+        crate::log!(
+            "Gemerkt: bessere Stufen scheiterten auf diesem Tablet – beginne mit {}",
+            steps[idx].label()
+        );
+    }
+    let step = steps[idx].clone();
+    let gen: u32 = 1;
+    if let Ok(mut g) = DECODER_FAIL.lock() {
+        *g = None; // Meldungen einer früheren Verbindung zählen nicht
+    }
+    let codec = codec_of(&step.codec);
+    let fps = step.fps;
+    let (sw, sh) = {
+        let c = cap_size((sw, sh), (step.width, step.height));
+        if c != (sw, sh) {
+            crate::log!(
+                "Übertragung in {}x{} (größte Stufe, die dieses Tablet schafft), Windows bleibt bei {sw}x{sh}",
+                c.0,
+                c.1
+            );
+        }
+        c
+    };
+    let bitrate = video::bitrate_for(cfg, sw, sh, fps, codec);
+    crate::state::set_status(&format!(
+        "{}: {name} · {sw}×{sh} · {fps} Hz",
+        crate::i18n::tr("Verbunden", "Connected")
+    ));
+    crate::notify::once(
+        "connected",
+        crate::i18n::tr("Tablet verbunden", "Tablet connected"),
+        &format!(
+            "{name} · {sw}×{sh} · {fps} Hz\n{} „{}“.",
+            crate::i18n::tr(
+                "Ton übers Tablet: Soundeinstellungen →",
+                "Sound on the tablet: Sound settings →"
+            ),
+            cfg.audio_device_rename
+        ),
+        Duration::from_secs(120),
+    );
+    crate::log!(
+        "Stream: {codec:?} über {encoder:?}, {sw}x{sh} @ {fps} fps, {} Mbit/s",
+        bitrate / 1_000_000
+    );
+
+    let params = StreamParams {
+        hmonitor: hmon,
+        width: sw,
+        height: sh,
+        fps,
+        codec,
+        encoder,
+        bitrate,
+        capture_gpu,
+        dup_frames: !sparse_allowed(&cfg_serial_prompt(cfg, serial)),
+        // erstes Verbinden dieses Tablets: erst den Dekoder prüfen
+        probe: cfg.sparse_frames
+            && cfg_serial_prompt(cfg, serial).is_none()
+            && video::has_dup_frames(),
+        native: is_native(&vd.device_name, sw, sh),
+        pixel_exact: is_native(&vd.device_name, sw, sh) && (sw, sh) == (w, h),
+    };
+    video::set_sparse(!params.dup_frames);
+    video::set_probing(params.probe);
+    if params.probe {
+        crate::log!("Erstes Verbinden: Dekoder des Tablets wird geprüft");
+        // ohne Antwort (z. B. ältere App) nach 6 s normal weiter
+        let generation = PROBE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(6));
+            if PROBE_GEN.load(std::sync::atomic::Ordering::SeqCst) == generation
+                && video::is_probing()
+            {
+                crate::log!("Dekoder-Prüfung ohne Ergebnis – gleichmäßiger Bildstrom");
+                video::set_probing(false);
+                crate::state::request_reconnect();
+            }
+        });
+    }
+    if !params.dup_frames {
+        crate::log!("Bilder nur bei Änderungen (Dekoder des Tablets gibt jedes Bild sofort aus)");
+    }
+    let ctx = Ctx {
+        serial,
+        hello: &hello,
+        vd: &vd,
+        native: (w, h, hz),
+        name: &name,
+        fallback_encoder,
+        sig,
+    };
+    let mut live = Live {
+        params,
+        steps,
+        idx,
+        step,
+        gen,
+        cur: cfg.clone(),
+        restarts: 0,
+        audio,
+    };
+    loop {
+        // erstes Verbinden dieses Tablets: Dekoder wird geprüft, danach ggf. umgestellt –
+        // das Tablet zeigt so lange den Verbindungsbildschirm (kein sichtbarer Ruckler)
+        let check = live.params.probe;
+        let conf = serde_json::json!({
+            "codec": live.params.codec.name(),
+            "width": live.params.width,
+            "height": live.params.height,
+            "fps": live.params.fps,
+            "check": check,
+            "decoder": live.step.decoder,
+            "gen": live.gen,
+            // nur zum Testen: App lässt diese Stufe absichtlich scheitern
+            "test_fail": (live.idx as u32) < live.cur.test_decoder_fail,
+        })
+        .to_string();
+        if write_frame(&mut sock, T_CONFIG, conf.as_bytes()).is_err()
+            || video::send_settings(&mut sock).is_err()
+        {
+            return Err(Disconnected.into());
+        }
+        crate::state::take_reconnect(); // alte Anfragen verwerfen – diese Übertragung ist frisch
+        let started = Instant::now();
+        match video::stream(&live.cur, &live.params, &mut sock)? {
+            StreamEnd::EncoderExited => live.encoder_exited(&ctx, started)?,
+            StreamEnd::Restart => live.restart(&ctx, &mut sock)?,
+        }
+    }
+}
+
+/// Anschlüsse weiterleiten, App bei Bedarf starten, anmelden und HELLO empfangen.
+/// Kennt die App das Sitzungsgeheimnis nicht, wird sie damit neu gestartet.
+fn connect(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<(TcpStream, Hello)> {
+    for port in [cfg.video_port, cfg.audio_port] {
+        adb.on(
+            serial,
+            &["forward", &format!("tcp:{port}"), &format!("tcp:{port}")],
+        )?;
+    }
+    if launch {
+        start_app(cfg, adb, serial)?;
+    }
+
+    Ok(match connect_hello(cfg, launch) {
+        Err(e) if e.downcast_ref::<NeedsToken>().is_some() => {
+            crate::log!("Tablet-App kennt das Sitzungsgeheimnis nicht – wird damit neu gestartet");
+            start_app(cfg, adb, serial)?;
+            connect_hello(cfg, true)?
+        }
+        r => r?,
+    })
+}
+
+/// Virtuellen Monitor finden, an den Desktop anhängen und auf den Modus des Tablets
+/// stellen. Liefert ihn mit seinem Monitor-Handle (für die Aufnahme).
+fn attach_monitor(cfg: &Config, w: u32, h: u32, hz: u32) -> Result<(display::VirtualDisplay, u64)> {
     let deadline = Instant::now() + Duration::from_secs(15);
     let vd = loop {
         if let Some(d) = display::find_virtual_display(&cfg.display_match) {
@@ -471,35 +669,13 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         }
         std::thread::sleep(Duration::from_millis(300));
     };
-    if let Some((mw, mh, mhz)) = display::mode_of(&vd.device_name) {
-        crate::log!("Windows-Modus des Tablet-Monitors: {mw}x{mh} @ {mhz} Hz");
-    }
-    // in der Windows-Auflösung übertragen; ist sie kleiner, rechnet das Tablet hoch
-    let (sw, sh) = stream_size(&vd.device_name, w, h, hz);
-    if (sw, sh) != (w, h) {
-        crate::log!("Übertragung in {sw}x{sh}, das Tablet rechnet auf {w}x{h} hoch");
-    }
+    Ok((vd, hmon))
+}
 
-    // Windows verliert bei neuen Monitoren gern das Hintergrundbild → wiederherstellen
-    crate::wallpaper::restore_later();
-    // Position merken, wenn der Nutzer den Monitor verschiebt
-    let _layout = LayoutWatcher::start(vd.clone());
-    // Touch/Stift vom Tablet annehmen, Laufzeit messen
-    let _input = InputReader::start(&sock, vd.clone())?;
-    // Tablet-Display mit dem PC-Bildschirm aus- und einschalten
-    let _power = PowerWatcher::start(adb, serial);
-    let _active = ActiveDevice::set(adb, serial);
-
-    // --- Ton ---
-    let mut audio = if cfg.audio_enabled {
-        Some(AudioSession::start(cfg))
-    } else {
-        None
-    };
-
-    // --- Video ---
-    // Encoder des Grafikchips, der den Tablet-Monitor zeichnet (Laptops mit zwei Chips);
-    // unbekannt → wie bisher der Chip des Hauptbildschirms
+/// Encoder des Grafikchips, der den Tablet-Monitor zeichnet (Laptops mit zwei Chips);
+/// unbekannt → wie bisher der Chip des Hauptbildschirms.
+/// Liefert (Encoder, Encoder des Hauptbildschirms, Grafikchip für die Aufnahme).
+fn pick_encoder(cfg: &Config, vd: &display::VirtualDisplay) -> (Encoder, Encoder, Option<u32>) {
     let render = display::render_gpu(&vd.device_name);
     let fallback_encoder = Encoder::pick(cfg, display::primary_gpu_vendor());
     let encoder = match render
@@ -524,291 +700,198 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
             }
         );
     }
-    // Übertragungsstufen: beste zuerst; scheitert eine auf dem Tablet, kommt die nächste
-    let sig = ladder::signature(hello.app_version, &hello.build);
-    let mut steps = plan(cfg, &hello, encoder);
-    let remembered = cfg
-        .devices
-        .get(serial)
-        .and_then(|d| d.stream_fallback.clone());
-    let Some(mut idx) = ladder::start_index(&steps, remembered.as_ref(), &sig, unix_now()) else {
-        crate::log!("Gemerkt: dieses Tablet kann das Bild nicht dekodieren (Zeile stream_fallback in usbcd.toml löschen = neu probieren)");
-        send_unsupported(&mut sock);
-        return Err(Unsupported.into());
-    };
-    if remembered.is_some() && idx == 0 {
-        forget_fallback(serial); // neue App-/Android-Version oder lange her: neu lernen
-    }
-    if steps.len() > 1 {
-        crate::log!(
-            "Übertragungsstufen: {}",
-            steps
-                .iter()
-                .map(super::ladder::Step::label)
-                .collect::<Vec<_>>()
-                .join(" → ")
-        );
-    }
-    if idx > 0 {
-        crate::log!(
-            "Gemerkt: bessere Stufen scheiterten auf diesem Tablet – beginne mit {}",
-            steps[idx].label()
-        );
-    }
-    let mut step = steps[idx].clone();
-    let mut gen: u32 = 1;
-    if let Ok(mut g) = DECODER_FAIL.lock() {
-        *g = None; // Meldungen einer früheren Verbindung zählen nicht
-    }
-    let codec = codec_of(&step.codec);
-    let fps = step.fps;
-    let (sw, sh) = {
-        let c = cap_size((sw, sh), (step.width, step.height));
-        if c != (sw, sh) {
-            crate::log!(
-                "Übertragung in {}x{} (größte Stufe, die dieses Tablet schafft), Windows bleibt bei {sw}x{sh}",
-                c.0,
-                c.1
-            );
-        }
-        c
-    };
-    let bitrate = video::bitrate_for(cfg, sw, sh, fps, codec);
-    crate::state::set_status(&format!(
-        "{}: {name} · {sw}×{sh} · {fps} Hz",
-        crate::i18n::tr("Verbunden", "Connected")
-    ));
-    crate::notify::once(
-        "connected",
-        crate::i18n::tr("Tablet verbunden", "Tablet connected"),
-        &format!(
-            "{name} · {sw}×{sh} · {fps} Hz\n{} „{}“.",
-            crate::i18n::tr(
-                "Ton übers Tablet: Soundeinstellungen →",
-                "Sound on the tablet: Sound settings →"
-            ),
-            cfg.audio_device_rename
-        ),
-        Duration::from_secs(120),
-    );
-    crate::log!(
-        "Stream: {codec:?} über {encoder:?}, {sw}x{sh} @ {fps} fps, {} Mbit/s",
-        bitrate / 1_000_000
-    );
+    (encoder, fallback_encoder, capture_gpu)
+}
 
-    let mut params = StreamParams {
-        hmonitor: hmon,
-        width: sw,
-        height: sh,
-        fps,
-        codec,
-        encoder,
-        bitrate,
-        capture_gpu,
-        dup_frames: !sparse_allowed(&cfg_serial_prompt(cfg, serial)),
-        // erstes Verbinden dieses Tablets: erst den Dekoder prüfen
-        probe: cfg.sparse_frames
-            && cfg_serial_prompt(cfg, serial).is_none()
-            && video::has_dup_frames(),
-        native: is_native(&vd.device_name, sw, sh),
-        pixel_exact: is_native(&vd.device_name, sw, sh) && (sw, sh) == (w, h),
-    };
-    video::set_sparse(!params.dup_frames);
-    video::set_probing(params.probe);
-    if params.probe {
-        crate::log!("Erstes Verbinden: Dekoder des Tablets wird geprüft");
-        // ohne Antwort (z. B. ältere App) nach 6 s normal weiter
-        let generation = PROBE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(6));
-            if PROBE_GEN.load(std::sync::atomic::Ordering::SeqCst) == generation
-                && video::is_probing()
-            {
-                crate::log!("Dekoder-Prüfung ohne Ergebnis – gleichmäßiger Bildstrom");
-                video::set_probing(false);
-                crate::state::request_reconnect();
-            }
-        });
-    }
-    if !params.dup_frames {
-        crate::log!("Bilder nur bei Änderungen (Dekoder des Tablets gibt jedes Bild sofort aus)");
-    }
-    let mut restarts = 0u32;
-    let mut cur = cfg.clone();
-    loop {
-        // erstes Verbinden dieses Tablets: Dekoder wird geprüft, danach ggf. umgestellt –
-        // das Tablet zeigt so lange den Verbindungsbildschirm (kein sichtbarer Ruckler)
-        let check = params.probe;
-        let conf = serde_json::json!({
-            "codec": params.codec.name(),
-            "width": params.width,
-            "height": params.height,
-            "fps": params.fps,
-            "check": check,
-            "decoder": step.decoder,
-            "gen": gen,
-            // nur zum Testen: App lässt diese Stufe absichtlich scheitern
-            "test_fail": (idx as u32) < cur.test_decoder_fail,
-        })
-        .to_string();
-        if write_frame(&mut sock, T_CONFIG, conf.as_bytes()).is_err()
-            || video::send_settings(&mut sock).is_err()
-        {
+/// Was sich während einer Verbindung nicht ändert.
+struct Ctx<'a> {
+    serial: &'a str,
+    hello: &'a Hello,
+    vd: &'a display::VirtualDisplay,
+    /// Auflösung und Bildrate des Tablets
+    native: (u32, u32, u32),
+    /// Anzeigename des Tablets
+    name: &'a str,
+    /// Encoder des Hauptbildschirms (Rückfall, wenn der Grafikchip des Tablet-Monitors scheitert)
+    fallback_encoder: Encoder,
+    /// Signatur von App und Android-Version (für gemerkte Übertragungsstufen)
+    sig: String,
+}
+
+/// Laufende Übertragung: ändert sich bei Neustarts, neuen Einstellungen und neuen Stufen.
+struct Live {
+    params: StreamParams,
+    steps: Vec<Step>,
+    idx: usize,
+    step: Step,
+    /// zählt die gesendeten Stufen (Meldungen der App gehören zu genau einer)
+    gen: u32,
+    cur: Config,
+    restarts: u32,
+    audio: Option<AudioSession>,
+}
+
+impl Live {
+    /// ffmpeg hat sich beendet: neu starten, nach wiederholten Abbrüchen vorsichtiger.
+    fn encoder_exited(&mut self, ctx: &Ctx, started: Instant) -> Result<()> {
+        if crate::state::windows_ending() {
+            // Windows hat ffmpeg beim Herunterfahren beendet – nicht neu starten
+            crate::log!("Windows wird beendet – Bildübertragung nicht neu gestartet");
             return Err(Disconnected.into());
         }
-        crate::state::take_reconnect(); // alte Anfragen verwerfen – diese Übertragung ist frisch
-        let started = Instant::now();
-        match video::stream(&cur, &params, &mut sock)? {
-            StreamEnd::EncoderExited => {
-                if crate::state::windows_ending() {
-                    // Windows hat ffmpeg beim Herunterfahren beendet – nicht neu starten
-                    crate::log!("Windows wird beendet – Bildübertragung nicht neu gestartet");
-                    return Err(Disconnected.into());
-                }
-                if started.elapsed() > Duration::from_secs(20) {
-                    restarts = 0;
-                }
-                restarts += 1;
-                if restarts > 5 {
-                    bail!(
-                        "{}",
-                        crate::i18n::tr(
-                            "Die Bildübertragung (FFmpeg) bricht ständig ab – encoder = \"software\" in usbcd.toml testen",
-                            "The picture transmission (FFmpeg) keeps stopping – try encoder = \"software\" in usbcd.toml"
-                        )
-                    );
-                }
-                crate::log!("ffmpeg beendet – Neustart ({restarts}/5)");
-                // Aufnahme auf dem Grafikchip des Tablet-Monitors klappt nicht → zurück zur
-                // bisherigen Wahl (Windows-Standard, Encoder des Hauptbildschirms)
-                if restarts >= 2 && params.capture_gpu.is_some() {
-                    params.capture_gpu = None;
-                    if fallback_encoder != Encoder::Software {
-                        params.encoder = fallback_encoder;
-                    }
-                    crate::log!(
-                        "Aufnahme auf dem Grafikchip des Tablet-Monitors ausgeschaltet – weiter mit {:?}",
-                        params.encoder
-                    );
-                }
-                // Hardware-Encoder startet immer wieder nicht → Software-Encoder (nur bei
-                // encoder = "auto"; kann nur H.264, deshalb Stufen neu bestimmen)
-                if restarts >= 4
-                    && params.encoder != Encoder::Software
-                    && cur.encoder == crate::video::EncoderSetting::Auto
-                {
-                    params.encoder = Encoder::Software;
-                    params.capture_gpu = None;
-                    steps = plan(&cur, &hello, Encoder::Software);
-                    idx = 0;
-                    step = steps[0].clone();
-                    gen += 1;
-                    params.codec = codec_of(&step.codec);
-                    params.fps = step.fps;
-                    restarts = 1;
-                    crate::log!(
-                        "Hardware-Encoder startet nicht – weiter mit dem Software-Encoder: {}",
-                        step.label()
-                    );
-                }
-                // Einmaliger Absturz bei unverändertem Monitor (z. B. Intel „Invalid
-                // FrameType“): sofort neu starten. Sonst kurz warten – Windows kann den
-                // Monitor gerade neu anlegen (Anordnung geändert, Grafiktreiber neu gestartet).
-                let same_monitor = display::hmonitor_for(&vd.device_name) == Some(params.hmonitor);
-                std::thread::sleep(Duration::from_millis(if restarts == 1 && same_monitor {
-                    50
-                } else {
-                    800
-                }));
-                // dann gilt ggf. ein neues Monitor-Handle
-                if let Some(hm) = display::hmonitor_for(&vd.device_name) {
-                    if hm != params.hmonitor {
-                        crate::log!("Tablet-Monitor neu erkannt");
-                        params.hmonitor = hm;
-                    }
-                }
-                resize(
-                    &mut params,
-                    &cur,
-                    &vd.device_name,
-                    (w, h, hz),
-                    (step.width, step.height),
-                );
+        if started.elapsed() > Duration::from_secs(20) {
+            self.restarts = 0;
+        }
+        self.restarts += 1;
+        if self.restarts > 5 {
+            bail!(
+                "{}",
+                crate::i18n::tr(
+                    "Die Bildübertragung (FFmpeg) bricht ständig ab – encoder = \"software\" in usbcd.toml testen",
+                    "The picture transmission (FFmpeg) keeps stopping – try encoder = \"software\" in usbcd.toml"
+                )
+            );
+        }
+        crate::log!("ffmpeg beendet – Neustart ({}/5)", self.restarts);
+        // Aufnahme auf dem Grafikchip des Tablet-Monitors klappt nicht → zurück zur
+        // bisherigen Wahl (Windows-Standard, Encoder des Hauptbildschirms)
+        if self.restarts >= 2 && self.params.capture_gpu.is_some() {
+            self.params.capture_gpu = None;
+            if ctx.fallback_encoder != Encoder::Software {
+                self.params.encoder = ctx.fallback_encoder;
             }
-            StreamEnd::Restart => {
-                // Tablet meldet: diese Stufe geht nicht → nächste
-                if let Some(reason) = take_decoder_failure(gen) {
-                    let failed = step.label();
-                    idx += 1;
-                    if idx >= steps.len() {
-                        crate::log!(
-                            "Tablet kann {failed} nicht anzeigen ({reason}) – keine weitere Stufe"
-                        );
-                        if cur.test_decoder_fail == 0 {
-                            remember_fallback(serial, None, &sig);
-                        }
-                        send_unsupported(&mut sock);
-                        return Err(Unsupported.into());
-                    }
-                    step = steps[idx].clone();
-                    gen += 1;
-                    params.codec = codec_of(&step.codec);
-                    params.fps = step.fps;
-                    if cur.test_decoder_fail == 0 {
-                        remember_fallback(serial, Some(step.clone()), &sig);
-                    }
-                    crate::log!(
-                        "Tablet kann {failed} nicht anzeigen ({reason}) – weiter mit {}",
-                        step.label()
-                    );
-                }
-                // neue Einstellungen übernehmen, ohne Verbindung und Monitor anzufassen
-                cur = crate::config::current();
-                if params.probe && !video::is_probing() {
-                    params.probe = false; // Prüfung beendet → normale Bildrate
-                }
-                let dup = !sparse_allowed(&cfg_serial_prompt(&cur, serial));
-                if dup != params.dup_frames {
-                    crate::log!(
-                        "{}",
-                        if dup {
-                            "Wieder gleichmäßiger Bildstrom (Dekoder hält Bilder fest)"
-                        } else {
-                            "Bilder nur bei Änderungen (Dekoder des Tablets gibt jedes Bild sofort aus)"
-                        }
-                    );
-                    params.dup_frames = dup;
-                    video::set_sparse(!dup);
-                }
-                resize(
-                    &mut params,
-                    &cur,
-                    &vd.device_name,
-                    (w, h, hz),
-                    (step.width, step.height),
-                );
-                params.bitrate =
-                    video::bitrate_for(&cur, params.width, params.height, params.fps, params.codec);
-                crate::state::set_status(&format!(
-                    "{}: {name} · {}×{} · {} Hz",
-                    crate::i18n::tr("Verbunden", "Connected"),
-                    params.width,
-                    params.height,
-                    params.fps
-                ));
-                if cur.audio_enabled != audio.is_some() {
-                    audio = None; // alte Ton-Übertragung zuerst beenden
-                    if cur.audio_enabled {
-                        audio = Some(AudioSession::start(&cur));
-                    }
-                }
-                crate::log!(
-                    "Neue Einstellungen: {} Mbit/s, Ton {}",
-                    params.bitrate / 1_000_000,
-                    if cur.audio_enabled { "an" } else { "aus" }
-                );
+            crate::log!(
+                "Aufnahme auf dem Grafikchip des Tablet-Monitors ausgeschaltet – weiter mit {:?}",
+                self.params.encoder
+            );
+        }
+        // Hardware-Encoder startet immer wieder nicht → Software-Encoder (nur bei
+        // encoder = "auto"; kann nur H.264, deshalb Stufen neu bestimmen)
+        if self.restarts >= 4
+            && self.params.encoder != Encoder::Software
+            && self.cur.encoder == crate::video::EncoderSetting::Auto
+        {
+            self.params.encoder = Encoder::Software;
+            self.params.capture_gpu = None;
+            self.steps = plan(&self.cur, ctx.hello, Encoder::Software);
+            self.idx = 0;
+            self.step = self.steps[0].clone();
+            self.gen += 1;
+            self.params.codec = codec_of(&self.step.codec);
+            self.params.fps = self.step.fps;
+            self.restarts = 1;
+            crate::log!(
+                "Hardware-Encoder startet nicht – weiter mit dem Software-Encoder: {}",
+                self.step.label()
+            );
+        }
+        // Einmaliger Absturz bei unverändertem Monitor (z. B. Intel „Invalid
+        // FrameType“): sofort neu starten. Sonst kurz warten – Windows kann den
+        // Monitor gerade neu anlegen (Anordnung geändert, Grafiktreiber neu gestartet).
+        let same_monitor = display::hmonitor_for(&ctx.vd.device_name) == Some(self.params.hmonitor);
+        std::thread::sleep(Duration::from_millis(
+            if self.restarts == 1 && same_monitor {
+                50
+            } else {
+                800
+            },
+        ));
+        // dann gilt ggf. ein neues Monitor-Handle
+        if let Some(hm) = display::hmonitor_for(&ctx.vd.device_name) {
+            if hm != self.params.hmonitor {
+                crate::log!("Tablet-Monitor neu erkannt");
+                self.params.hmonitor = hm;
             }
         }
+        resize(
+            &mut self.params,
+            &self.cur,
+            &ctx.vd.device_name,
+            ctx.native,
+            (self.step.width, self.step.height),
+        );
+        Ok(())
+    }
+
+    /// Tablet meldet eine gescheiterte Stufe oder neue Einstellungen: übernehmen, ohne
+    /// Verbindung und Monitor anzufassen.
+    fn restart(&mut self, ctx: &Ctx, sock: &mut TcpStream) -> Result<()> {
+        let name = ctx.name;
+        // Tablet meldet: diese Stufe geht nicht → nächste
+        if let Some(reason) = take_decoder_failure(self.gen) {
+            let failed = self.step.label();
+            self.idx += 1;
+            if self.idx >= self.steps.len() {
+                crate::log!("Tablet kann {failed} nicht anzeigen ({reason}) – keine weitere Stufe");
+                if self.cur.test_decoder_fail == 0 {
+                    remember_fallback(ctx.serial, None, &ctx.sig);
+                }
+                send_unsupported(sock);
+                return Err(Unsupported.into());
+            }
+            self.step = self.steps[self.idx].clone();
+            self.gen += 1;
+            self.params.codec = codec_of(&self.step.codec);
+            self.params.fps = self.step.fps;
+            if self.cur.test_decoder_fail == 0 {
+                remember_fallback(ctx.serial, Some(self.step.clone()), &ctx.sig);
+            }
+            crate::log!(
+                "Tablet kann {failed} nicht anzeigen ({reason}) – weiter mit {}",
+                self.step.label()
+            );
+        }
+        // neue Einstellungen übernehmen, ohne Verbindung und Monitor anzufassen
+        self.cur = crate::config::current();
+        if self.params.probe && !video::is_probing() {
+            self.params.probe = false; // Prüfung beendet → normale Bildrate
+        }
+        let dup = !sparse_allowed(&cfg_serial_prompt(&self.cur, ctx.serial));
+        if dup != self.params.dup_frames {
+            crate::log!(
+                "{}",
+                if dup {
+                    "Wieder gleichmäßiger Bildstrom (Dekoder hält Bilder fest)"
+                } else {
+                    "Bilder nur bei Änderungen (Dekoder des Tablets gibt jedes Bild sofort aus)"
+                }
+            );
+            self.params.dup_frames = dup;
+            video::set_sparse(!dup);
+        }
+        resize(
+            &mut self.params,
+            &self.cur,
+            &ctx.vd.device_name,
+            ctx.native,
+            (self.step.width, self.step.height),
+        );
+        self.params.bitrate = video::bitrate_for(
+            &self.cur,
+            self.params.width,
+            self.params.height,
+            self.params.fps,
+            self.params.codec,
+        );
+        crate::state::set_status(&format!(
+            "{}: {name} · {}×{} · {} Hz",
+            crate::i18n::tr("Verbunden", "Connected"),
+            self.params.width,
+            self.params.height,
+            self.params.fps
+        ));
+        if self.cur.audio_enabled != self.audio.is_some() {
+            self.audio = None; // alte Ton-Übertragung zuerst beenden
+            if self.cur.audio_enabled {
+                self.audio = Some(AudioSession::start(&self.cur));
+            }
+        }
+        crate::log!(
+            "Neue Einstellungen: {} Mbit/s, Ton {}",
+            self.params.bitrate / 1_000_000,
+            if self.cur.audio_enabled { "an" } else { "aus" }
+        );
+        Ok(())
     }
 }
 
