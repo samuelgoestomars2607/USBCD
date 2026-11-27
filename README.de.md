@@ -75,7 +75,10 @@ SuperDisplay besser bedient. Nicht in der Tabelle ist OpenDisplay, ebenfalls Ope
 * **USBCD läuft ohne Administratorrechte** (Autostart über `HKCU\…\Run`). Was Rechte braucht – den virtuellen
   Monitor ein-/ausschalten, seinen Modus eintragen, den Lautsprecher benennen –, erledigt der Windows-Dienst
   **„USBCD Helper“**. Er nimmt über die lokale Leitung `\\.\pipe\USBCD-Helper` nur fest eingebaute Befehle mit
-  geprüften Werten an, und nur von der installierten `USBCD.exe`. Keine Pfade, keine Skripte, kein PowerShell.
+  geprüften Werten an. Keine Pfade, keine Skripte, kein PowerShell. Außerdem prüft er, ob der Aufrufer die
+  installierte `USBCD.exe` ist (über ihren Programmpfad). Das hält andere Programme fern, ist aber keine harte
+  Grenze gegen Schadsoftware, die schon unter deinem Konto läuft – deshalb können die Befehle nicht mehr, als den
+  virtuellen Monitor zu schalten und den Tablet-Lautsprecher einzurichten.
 * **Gegenseitige Anmeldung PC ↔ Tablet:** Beim Start bekommt die App über adb ein zufälliges Geheimnis
   (nur im Arbeitsspeicher, gültig solange USBCD läuft). Jede Verbindung beginnt mit einem HMAC-SHA256-
   Challenge-Response in beide Richtungen. Eine fremde App, die den USBCD-Anschluss auf dem Tablet belegt,

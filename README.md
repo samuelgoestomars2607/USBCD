@@ -75,7 +75,9 @@ better choice. Not in the table is OpenDisplay, also open source, because it
 * **USBCD runs without administrator rights** (autostart via `HKCU\…\Run`). The few things that need rights –
   switching the virtual monitor on/off, setting its mode, naming the speaker – are done by the Windows service
   **"USBCD Helper"**. Over the local pipe `\\.\pipe\USBCD-Helper` it accepts only fixed, built-in commands with
-  checked values, and only from the installed `USBCD.exe`. No paths, no scripts, no PowerShell.
+  checked values. No paths, no scripts, no PowerShell. It also checks that the caller is the installed `USBCD.exe`
+  (by its program path). That keeps other programs out, but is no hard barrier against malware already running
+  under your account – which is why the commands can do nothing more than switch the virtual monitor and set up the tablet speaker.
 * **Mutual sign-in PC ↔ tablet:** on launch the app receives a random secret via adb (kept in memory only, valid
   while USBCD runs). Every connection starts with an HMAC-SHA256 challenge-response in both directions. Another app
   occupying the USBCD port on the tablet therefore gets no picture, and nobody can feed the app a fake picture.

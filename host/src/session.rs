@@ -1017,6 +1017,10 @@ fn is_native(device: &str, w: u32, h: u32) -> bool {
 
 /// Liest, was das Tablet auf der Video-Verbindung zurückschickt: Touch/Stift, PONG,
 /// Lautstärketasten und die Bilder der Selfie-Kamera (Webcam).
+/// So lange darf das Tablet schweigen, nachdem es auf den ersten PING geantwortet hat
+/// (es antwortet sonst jede Sekunde).
+const IDLE: Duration = Duration::from_secs(30);
+
 struct InputReader {
     sock: TcpStream,
 }
@@ -1028,8 +1032,31 @@ impl InputReader {
         crate::camera::session_started();
         std::thread::spawn(move || {
             let mut injector: Option<crate::input::Injector> = None;
-            // angemeldet: Kamerabilder (Schlüsselbilder) dürfen größer sein
-            while let Ok((t, p)) = crate::proto::read_frame_max(&mut rd, 2 << 20) {
+            // Wächter wie in der App: Sobald das Tablet auf den ersten PING geantwortet hat,
+            // meldet es sich mindestens jede Sekunde. Kommt IDLE lang gar nichts, hängt die
+            // Gegenstelle – Verbindung beenden statt ewig zu warten.
+            let mut watchdog = false;
+            loop {
+                // angemeldet: Kamerabilder (Schlüsselbilder) dürfen größer sein
+                let (t, p) = match crate::proto::read_frame_max(&mut rd, 2 << 20) {
+                    Ok(frame) => frame,
+                    Err(e) => {
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                        ) {
+                            crate::log!(
+                                "Tablet meldet sich seit {} s nicht – Verbindung wird beendet",
+                                IDLE.as_secs()
+                            );
+                        }
+                        break;
+                    }
+                };
+                if !watchdog && t == crate::proto::T_PONG {
+                    watchdog = true;
+                    let _ = rd.set_read_timeout(Some(IDLE));
+                }
                 match t {
                     crate::proto::T_INPUT => {
                         let c = crate::config::current();
@@ -1057,6 +1084,9 @@ impl InputReader {
                     _ => {}
                 }
             }
+            // Verbindung schließen: auch ein hängender Schreibvorgang der Übertragung bricht
+            // dann ab, die Sitzung endet und die Tablet-Erkennung verbindet neu
+            let _ = rd.shutdown(std::net::Shutdown::Both);
             crate::camera::session_ended();
         });
         Ok(InputReader { sock: keep })
