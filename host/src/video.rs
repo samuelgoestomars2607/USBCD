@@ -418,49 +418,7 @@ pub enum StreamEnd {
 /// Startet ffmpeg und schickt jedes fertige Bild an das Tablet. Kehrt mit
 /// Err zurück, wenn die Verbindung zum Tablet abreißt.
 pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<StreamEnd> {
-    let args = ffmpeg_args(cfg, p);
-    crate::log!("ffmpeg {}", args.join(" "));
-    let mut cmd = command(&cfg.ffmpeg_exe);
-    cmd.args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = crate::process::spawn_stream(&mut cmd, cfg.stream_priority)
-        .context("ffmpeg konnte nicht gestartet werden")?;
-    // Übertragung arbeitet in Echtzeit: auf dem Akku nicht drosseln
-    crate::process::high_qos_current_thread();
-
-    if let Some(err) = child.stderr.take() {
-        std::thread::spawn(move || {
-            for line in BufReader::new(err).lines().map_while(Result::ok) {
-                // harmlose Meldungen bei gleichmäßigem Bildstrom nicht protokollieren
-                if line.contains("non monotonically increasing dts")
-                    || line.contains("Last message repeated")
-                {
-                    continue;
-                }
-                crate::log!("ffmpeg: {line}");
-            }
-        });
-    }
-    let mut out = child.stdout.take().context("ffmpeg stdout")?;
-    // Lesen in eigenem Thread: so merken wir, wann ffmpeg mit einem Bild fertig
-    // ist (kurze Schreibpause) und können es ohne ein Bild Verzögerung senden.
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(256);
-    std::thread::spawn(move || {
-        crate::process::high_qos_current_thread();
-        let mut buf = vec![0u8; 256 * 1024];
-        loop {
-            match out.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
+    let (mut child, rx) = start_ffmpeg(cfg, p)?;
 
     let mut splitter = AnnexBSplitter::new(p.codec);
     let mut aus = Vec::new();
@@ -520,32 +478,7 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
                 true
             }
         };
-        let mut failed = None;
-        if crate::state::take_settings_dirty() {
-            if let Err(e) = send_settings(sock) {
-                failed = Some(e);
-            }
-        }
-        // Lautstärketaste am Tablet: neue Lautstärke zur Anzeige zurückmelden
-        if let Some(v) = crate::audio::take_volume_report() {
-            if let Err(e) = crate::proto::write_frame(sock, crate::proto::T_VOLUME, v.as_bytes()) {
-                failed = Some(e);
-            }
-        }
-        // Webcam: Tablet-Kamera nur einschalten, während eine App sie benutzt
-        let cam = crate::camera::control_json();
-        if cam != cam_sent {
-            match crate::proto::write_frame(sock, crate::proto::T_CAM, cam.as_bytes()) {
-                Ok(()) => cam_sent = cam,
-                Err(e) => failed = Some(e),
-            }
-        }
-        if last_ping.elapsed() >= Duration::from_secs(1) {
-            last_ping = Instant::now();
-            if let Err(e) = send_ping(sock) {
-                failed = Some(e);
-            }
-        }
+        let mut failed = send_side_messages(sock, &mut cam_sent, &mut last_ping);
         let sent_before = frames;
         for au in aus.drain(..) {
             // fortlaufend über Encoder-Neustarts hinweg (das Tablet sieht nie Rücksprünge)
@@ -607,6 +540,93 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
     let _ = child.kill();
     let _ = child.wait();
     res
+}
+
+/// ffmpeg starten: Meldungen ins Log, Bilddaten über einen eigenen Lese-Thread.
+fn start_ffmpeg(
+    cfg: &Config,
+    p: &StreamParams,
+) -> Result<(std::process::Child, std::sync::mpsc::Receiver<Vec<u8>>)> {
+    let args = ffmpeg_args(cfg, p);
+    crate::log!("ffmpeg {}", args.join(" "));
+    let mut cmd = command(&cfg.ffmpeg_exe);
+    cmd.args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = crate::process::spawn_stream(&mut cmd, cfg.stream_priority)
+        .context("ffmpeg konnte nicht gestartet werden")?;
+    // Übertragung arbeitet in Echtzeit: auf dem Akku nicht drosseln
+    crate::process::high_qos_current_thread();
+
+    if let Some(err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(err).lines().map_while(Result::ok) {
+                // harmlose Meldungen bei gleichmäßigem Bildstrom nicht protokollieren
+                if line.contains("non monotonically increasing dts")
+                    || line.contains("Last message repeated")
+                {
+                    continue;
+                }
+                crate::log!("ffmpeg: {line}");
+            }
+        });
+    }
+    let mut out = child.stdout.take().context("ffmpeg stdout")?;
+    // Lesen in eigenem Thread: so merken wir, wann ffmpeg mit einem Bild fertig
+    // ist (kurze Schreibpause) und können es ohne ein Bild Verzögerung senden.
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(256);
+    std::thread::spawn(move || {
+        crate::process::high_qos_current_thread();
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            match out.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    Ok((child, rx))
+}
+
+/// Nachrichten neben dem Bild: Tablet-Einstellungen, Lautstärke-Anzeige, Webcam-Steuerung,
+/// Ping (Laufzeitmessung). Liefert den letzten Schreibfehler (None = alles gesendet).
+fn send_side_messages(
+    sock: &mut TcpStream,
+    cam_sent: &mut String,
+    last_ping: &mut Instant,
+) -> Option<std::io::Error> {
+    let mut failed = None;
+    if crate::state::take_settings_dirty() {
+        if let Err(e) = send_settings(sock) {
+            failed = Some(e);
+        }
+    }
+    // Lautstärketaste am Tablet: neue Lautstärke zur Anzeige zurückmelden
+    if let Some(v) = crate::audio::take_volume_report() {
+        if let Err(e) = crate::proto::write_frame(sock, crate::proto::T_VOLUME, v.as_bytes()) {
+            failed = Some(e);
+        }
+    }
+    // Webcam: Tablet-Kamera nur einschalten, während eine App sie benutzt
+    let cam = crate::camera::control_json();
+    if cam != *cam_sent {
+        match crate::proto::write_frame(sock, crate::proto::T_CAM, cam.as_bytes()) {
+            Ok(()) => *cam_sent = cam,
+            Err(e) => failed = Some(e),
+        }
+    }
+    if last_ping.elapsed() >= Duration::from_secs(1) {
+        *last_ping = Instant::now();
+        if let Err(e) = send_ping(sock) {
+            failed = Some(e);
+        }
+    }
+    failed
 }
 
 #[cfg(test)]
