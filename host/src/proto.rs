@@ -183,7 +183,12 @@ impl Hello {
                 .take(96)
                 .collect();
         }
-        self.build = self.build.chars().filter(|c| !c.is_control()).take(200).collect();
+        self.build = self
+            .build
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(200)
+            .collect();
         Ok(())
     }
 }
@@ -233,7 +238,8 @@ mod tests {
         assert_eq!(h.modes[1].decoder, "c2.android.avc.decoderrm-rf");
         assert_eq!(h.modes[1].fps, crate::vdd::MAX_HZ as f32);
         // ältere App ohne Stufen
-        let mut old: Hello = serde_json::from_str(r#"{"width":2000,"height":1200,"refresh":60}"#).unwrap();
+        let mut old: Hello =
+            serde_json::from_str(r#"{"width":2000,"height":1200,"refresh":60}"#).unwrap();
         assert!(old.validate().is_ok());
         assert!(old.modes.is_empty());
     }
@@ -253,8 +259,10 @@ mod tests {
 pub(crate) mod kotlin_sync {
     use std::collections::HashMap;
 
-    pub const PROTO_KT: &str = include_str!("../../android/app/src/main/java/de/samuel/usbcd/Proto.kt");
-    pub const AUTH_KT: &str = include_str!("../../android/app/src/main/java/de/samuel/usbcd/Auth.kt");
+    pub const PROTO_KT: &str =
+        include_str!("../../android/app/src/main/java/de/samuel/usbcd/Proto.kt");
+    pub const AUTH_KT: &str =
+        include_str!("../../android/app/src/main/java/de/samuel/usbcd/Auth.kt");
 
     /// `const val NAME = Wert` aus einer Kotlin-Datei (Dezimal, 0x…, `a shl b`).
     pub fn kotlin_consts(src: &str) -> HashMap<String, u64> {
@@ -306,23 +314,44 @@ pub(crate) mod kotlin_sync {
         ];
         let kt = kotlin_consts(PROTO_KT);
         for (name, v) in rust {
-            assert_eq!(kt.get(*name), Some(&u64::from(*v)), "{name} weicht in Proto.kt ab");
+            assert_eq!(
+                kt.get(*name),
+                Some(&u64::from(*v)),
+                "{name} weicht in Proto.kt ab"
+            );
         }
         // keine Nachricht, die nur eine Seite kennt
-        let kt_types = kt.keys().filter(|k| k.starts_with("T_") || k.starts_with("VF_")).count();
-        assert_eq!(kt_types, rust.len(), "Proto.kt kennt Nachrichten, die proto.rs fehlen");
+        let kt_types = kt
+            .keys()
+            .filter(|k| k.starts_with("T_") || k.starts_with("VF_"))
+            .count();
+        assert_eq!(
+            kt_types,
+            rust.len(),
+            "Proto.kt kennt Nachrichten, die proto.rs fehlen"
+        );
         // Typen eindeutig
-        let mut seen: Vec<u8> = rust.iter().filter(|(n, _)| n.starts_with("T_")).map(|(_, v)| *v).collect();
+        let mut seen: Vec<u8> = rust
+            .iter()
+            .filter(|(n, _)| n.starts_with("T_"))
+            .map(|(_, v)| *v)
+            .collect();
         seen.sort_unstable();
         seen.dedup();
-        assert_eq!(seen.len(), rust.iter().filter(|(n, _)| n.starts_with("T_")).count());
+        assert_eq!(
+            seen.len(),
+            rust.iter().filter(|(n, _)| n.starts_with("T_")).count()
+        );
     }
 
     #[test]
     fn same_limits_and_ports() {
         let kt = kotlin_consts(PROTO_KT);
         assert_eq!(kt["MAX_FRAME"], super::MAX_FRAME as u64);
-        assert_eq!(kt["STILL_RGBA_ZLIB"], u64::from(crate::still::FORMAT_RGBA_ZLIB));
+        assert_eq!(
+            kt["STILL_RGBA_ZLIB"],
+            u64::from(crate::still::FORMAT_RGBA_ZLIB)
+        );
         let cfg = crate::config::Config::default();
         assert_eq!(kt["VIDEO_PORT"], u64::from(cfg.video_port));
         assert_eq!(kt["AUDIO_PORT"], u64::from(cfg.audio_port));

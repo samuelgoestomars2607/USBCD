@@ -555,7 +555,9 @@ impl MmcssAudio {
         let mut idx = 0u32;
         let h = unsafe { AvSetMmThreadCharacteristicsW(wide("Audio").as_ptr(), &mut idx) };
         if h.is_null() {
-            crate::log!("Audio: Windows-Audio-Vorrang (MMCSS) nicht verfügbar – läuft normal weiter");
+            crate::log!(
+                "Audio: Windows-Audio-Vorrang (MMCSS) nicht verfügbar – läuft normal weiter"
+            );
         }
         MmcssAudio(h)
     }
@@ -564,7 +566,9 @@ impl MmcssAudio {
 impl Drop for MmcssAudio {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe { windows_sys::Win32::System::Threading::AvRevertMmThreadCharacteristics(self.0) };
+            unsafe {
+                windows_sys::Win32::System::Threading::AvRevertMmThreadCharacteristics(self.0)
+            };
         }
     }
 }
@@ -743,7 +747,11 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
         crate::log!(
             "Audio: {rate} Hz, {channels} Kanäle, {} → Tablet {out_ch} Kanäle; {}; Lautstärke {}",
             if is_float { "float" } else { "int" },
-            if evented { "ereignisgesteuert" } else { "regelmäßig abgefragt" },
+            if evented {
+                "ereignisgesteuert"
+            } else {
+                "regelmäßig abgefragt"
+            },
             if post_volume {
                 "von Windows angewendet"
             } else if manual_volume {
@@ -867,7 +875,8 @@ pub const KEY_DOWN: u8 = 2;
 pub const KEY_MUTE: u8 = 3;
 
 /// Warteschlange zum Lautstärke-Thread (eigener COM-Thread, blockiert nie den Lese-Thread)
-static VOLUME_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<u8>>> = std::sync::Mutex::new(None);
+static VOLUME_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<u8>>> =
+    std::sync::Mutex::new(None);
 /// Neueste Lautstärke für die Anzeige auf dem Tablet (JSON), wird im Video-Thread gesendet
 static VOLUME_REPORT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -959,11 +968,22 @@ fn endpoint_volume() -> Result<Com> {
     let en = Enumerator::new()?;
     let ep = find_endpoint(&cfg.audio_device_match, &en)?;
     unsafe {
-        let activate: unsafe extern "system" fn(P, *const GUID, u32, *const c_void, *mut P) -> HRESULT =
-            ep.dev.f(3);
+        let activate: unsafe extern "system" fn(
+            P,
+            *const GUID,
+            u32,
+            *const c_void,
+            *mut P,
+        ) -> HRESULT = ep.dev.f(3);
         let mut v: P = std::ptr::null_mut();
         check(
-            activate(ep.dev.0, &IID_IAUDIO_ENDPOINT_VOLUME, CLSCTX_ALL, std::ptr::null(), &mut v),
+            activate(
+                ep.dev.0,
+                &IID_IAUDIO_ENDPOINT_VOLUME,
+                CLSCTX_ALL,
+                std::ptr::null(),
+                &mut v,
+            ),
             "IAudioEndpointVolume",
         )?;
         Ok(Com(v))
@@ -984,7 +1004,10 @@ unsafe fn apply_key(v: &Com, key: u8) -> Result<(f32, bool)> {
     let muted = mute != 0;
     let (new_level, new_muted) = volume_step(level, muted, key);
     if (new_level - level).abs() > f32::EPSILON {
-        check(set_level(v.0, new_level, std::ptr::null()), "SetMasterVolumeLevelScalar")?;
+        check(
+            set_level(v.0, new_level, std::ptr::null()),
+            "SetMasterVolumeLevelScalar",
+        )?;
     }
     if new_muted != muted {
         check(set_mute(v.0, new_muted as i32, std::ptr::null()), "SetMute")?;

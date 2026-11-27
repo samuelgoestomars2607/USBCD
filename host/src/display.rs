@@ -189,16 +189,22 @@ pub fn render_gpu(device: &str) -> Option<RenderGpu> {
         let factory = Com(f);
         // IDXGIFactory::EnumAdapters (7), IDXGIAdapter::EnumOutputs (7) / GetDesc (8),
         // IDXGIOutput::GetDesc (7)
-        let enum_adapters: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT =
-            factory.f(7);
+        let enum_adapters: unsafe extern "system" fn(
+            *mut c_void,
+            u32,
+            *mut *mut c_void,
+        ) -> HRESULT = factory.f(7);
         for ai in 0..16 {
             let mut a: *mut c_void = std::ptr::null_mut();
             if enum_adapters(factory.0, ai, &mut a) < 0 || a.is_null() {
                 break;
             }
             let adapter = Com(a);
-            let enum_outputs: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT =
-                adapter.f(7);
+            let enum_outputs: unsafe extern "system" fn(
+                *mut c_void,
+                u32,
+                *mut *mut c_void,
+            ) -> HRESULT = adapter.f(7);
             for oi in 0..16 {
                 let mut o: *mut c_void = std::ptr::null_mut();
                 if enum_outputs(adapter.0, oi, &mut o) < 0 || o.is_null() {
@@ -208,11 +214,15 @@ pub fn render_gpu(device: &str) -> Option<RenderGpu> {
                 let get_desc: unsafe extern "system" fn(*mut c_void, *mut OutputDesc) -> HRESULT =
                     output.f(7);
                 let mut od: OutputDesc = zeroed();
-                if get_desc(output.0, &mut od) < 0 || !from_wide(&od.device_name).eq_ignore_ascii_case(device) {
+                if get_desc(output.0, &mut od) < 0
+                    || !from_wide(&od.device_name).eq_ignore_ascii_case(device)
+                {
                     continue;
                 }
-                let adapter_desc: unsafe extern "system" fn(*mut c_void, *mut AdapterDesc) -> HRESULT =
-                    adapter.f(8);
+                let adapter_desc: unsafe extern "system" fn(
+                    *mut c_void,
+                    *mut AdapterDesc,
+                ) -> HRESULT = adapter.f(8);
                 let mut ad: AdapterDesc = zeroed();
                 if adapter_desc(adapter.0, &mut ad) < 0 {
                     return None;
@@ -506,7 +516,9 @@ use windows_sys::Win32::Devices::Display::{
 const PATH_ACTIVE: u32 = DISPLAYCONFIG_PATH_ACTIVE;
 const MODE_IDX_INVALID: u32 = DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
 
-fn query_config(flags: u32) -> Result<(Vec<DISPLAYCONFIG_PATH_INFO>, Vec<DISPLAYCONFIG_MODE_INFO>)> {
+fn query_config(
+    flags: u32,
+) -> Result<(Vec<DISPLAYCONFIG_PATH_INFO>, Vec<DISPLAYCONFIG_MODE_INFO>)> {
     // Die Anzahl kann sich zwischen den beiden Aufrufen ändern → ein paar Versuche
     for _ in 0..5 {
         unsafe {
@@ -556,16 +568,21 @@ fn source_name(p: &DISPLAYCONFIG_PATH_INFO) -> Option<String> {
     }
 }
 
-fn same_luid(a: &windows_sys::Win32::Foundation::LUID, b: &windows_sys::Win32::Foundation::LUID) -> bool {
+fn same_luid(
+    a: &windows_sys::Win32::Foundation::LUID,
+    b: &windows_sys::Win32::Foundation::LUID,
+) -> bool {
     a.LowPart == b.LowPart && a.HighPart == b.HighPart
 }
 
 fn same_target(a: &DISPLAYCONFIG_PATH_INFO, b: &DISPLAYCONFIG_PATH_INFO) -> bool {
-    same_luid(&a.targetInfo.adapterId, &b.targetInfo.adapterId) && a.targetInfo.id == b.targetInfo.id
+    same_luid(&a.targetInfo.adapterId, &b.targetInfo.adapterId)
+        && a.targetInfo.id == b.targetInfo.id
 }
 
 fn same_source(a: &DISPLAYCONFIG_PATH_INFO, b: &DISPLAYCONFIG_PATH_INFO) -> bool {
-    same_luid(&a.sourceInfo.adapterId, &b.sourceInfo.adapterId) && a.sourceInfo.id == b.sourceInfo.id
+    same_luid(&a.sourceInfo.adapterId, &b.sourceInfo.adapterId)
+        && a.sourceInfo.id == b.sourceInfo.id
 }
 
 /// Hängt den Tablet-Monitor als eigenen (erweiterten) Bildschirm an. Wird er gerade
@@ -586,7 +603,10 @@ pub fn attach_extended(d: &VirtualDisplay) -> Result<()> {
     if ours.is_empty() {
         bail!("kein Anzeigepfad für {} gefunden", d.device_name);
     }
-    if active.iter().any(|a| ours.iter().any(|p| same_source(a, p))) {
+    if active
+        .iter()
+        .any(|a| ours.iter().any(|p| same_source(a, p)))
+    {
         return Ok(()); // schon angehängt
     }
     // Ausgang wählen: bevorzugt den, den Windows gerade spiegelt, sonst einen freien
@@ -599,8 +619,11 @@ pub fn attach_extended(d: &VirtualDisplay) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("kein Ausgang"))?;
 
     // Alle aktiven Pfade behalten – außer der Spiegelung auf diesen Ausgang
-    let kept: Vec<DISPLAYCONFIG_PATH_INFO> =
-        active.iter().filter(|a| !same_target(a, &pick)).copied().collect();
+    let kept: Vec<DISPLAYCONFIG_PATH_INFO> = active
+        .iter()
+        .filter(|a| !same_target(a, &pick))
+        .copied()
+        .collect();
     let (mut paths, new_modes) = remap_modes(&kept, &modes);
     let mut p = pick;
     p.flags = PATH_ACTIVE;
@@ -659,7 +682,13 @@ fn remap_modes(
 /// Wie Windows-Taste + P → „Erweitern“ (nur auf ausdrücklichen Klick des Nutzers).
 pub fn extend_all() -> Result<()> {
     let r = unsafe {
-        SetDisplayConfig(0, std::ptr::null(), 0, std::ptr::null(), SDC_APPLY | SDC_TOPOLOGY_EXTEND)
+        SetDisplayConfig(
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            SDC_APPLY | SDC_TOPOLOGY_EXTEND,
+        )
     };
     if r != 0 {
         bail!("SetDisplayConfig(Erweitern) = {r}");

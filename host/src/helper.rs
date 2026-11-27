@@ -720,7 +720,10 @@ mod tests {
     /// nur Lesen/Schreiben. Eine Änderung hier muss bewusst passieren.
     #[test]
     fn pipe_rights_unchanged() {
-        assert_eq!(PIPE_SDDL, "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
+        assert_eq!(
+            PIPE_SDDL,
+            "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+        );
         assert_eq!(MAX_LINE, 512);
     }
 }

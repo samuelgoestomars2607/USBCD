@@ -502,7 +502,10 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
     // unbekannt → wie bisher der Chip des Hauptbildschirms
     let render = display::render_gpu(&vd.device_name);
     let fallback_encoder = Encoder::pick(cfg, display::primary_gpu_vendor());
-    let encoder = match render.as_ref().map(|g| display::GpuVendor::from_pci(g.vendor_id)) {
+    let encoder = match render
+        .as_ref()
+        .map(|g| display::GpuVendor::from_pci(g.vendor_id))
+    {
         Some(v) if v != display::GpuVendor::Unknown => Encoder::pick(cfg, v),
         _ => fallback_encoder,
     };
@@ -524,7 +527,10 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
     // Übertragungsstufen: beste zuerst; scheitert eine auf dem Tablet, kommt die nächste
     let sig = ladder::signature(hello.app_version, &hello.build);
     let mut steps = plan(cfg, &hello, encoder);
-    let remembered = cfg.devices.get(serial).and_then(|d| d.stream_fallback.clone());
+    let remembered = cfg
+        .devices
+        .get(serial)
+        .and_then(|d| d.stream_fallback.clone());
     let Some(mut idx) = ladder::start_index(&steps, remembered.as_ref(), &sig, unix_now()) else {
         crate::log!("Gemerkt: dieses Tablet kann das Bild nicht dekodieren (Zeile stream_fallback in usbcd.toml löschen = neu probieren)");
         send_unsupported(&mut sock);
@@ -536,7 +542,11 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
     if steps.len() > 1 {
         crate::log!(
             "Übertragungsstufen: {}",
-            steps.iter().map(|s| s.label()).collect::<Vec<_>>().join(" → ")
+            steps
+                .iter()
+                .map(|s| s.label())
+                .collect::<Vec<_>>()
+                .join(" → ")
         );
     }
     if idx > 0 {
@@ -611,7 +621,9 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
         let generation = PROBE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(6));
-            if PROBE_GEN.load(std::sync::atomic::Ordering::SeqCst) == generation && video::is_probing() {
+            if PROBE_GEN.load(std::sync::atomic::Ordering::SeqCst) == generation
+                && video::is_probing()
+            {
                 crate::log!("Dekoder-Prüfung ohne Ergebnis – gleichmäßiger Bildstrom");
                 video::set_probing(false);
                 crate::util::request_reconnect();
@@ -712,7 +724,13 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                         params.hmonitor = hm;
                     }
                 }
-                resize(&mut params, &cur, &vd.device_name, (w, h, hz), (step.width, step.height));
+                resize(
+                    &mut params,
+                    &cur,
+                    &vd.device_name,
+                    (w, h, hz),
+                    (step.width, step.height),
+                );
             }
             StreamEnd::Restart => {
                 // Tablet meldet: diese Stufe geht nicht → nächste
@@ -720,7 +738,9 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                     let failed = step.label();
                     idx += 1;
                     if idx >= steps.len() {
-                        crate::log!("Tablet kann {failed} nicht anzeigen ({reason}) – keine weitere Stufe");
+                        crate::log!(
+                            "Tablet kann {failed} nicht anzeigen ({reason}) – keine weitere Stufe"
+                        );
                         if cur.test_decoder_fail == 0 {
                             remember_fallback(serial, None, &sig);
                         }
@@ -757,7 +777,13 @@ fn run_inner(cfg: &Config, adb: &Adb, serial: &str, launch: bool) -> Result<()> 
                     params.dup_frames = dup;
                     video::set_sparse(!dup);
                 }
-                resize(&mut params, &cur, &vd.device_name, (w, h, hz), (step.width, step.height));
+                resize(
+                    &mut params,
+                    &cur,
+                    &vd.device_name,
+                    (w, h, hz),
+                    (step.width, step.height),
+                );
                 params.bitrate =
                     video::bitrate_for(&cur, params.width, params.height, params.fps, params.codec);
                 crate::util::set_status(&format!(
@@ -815,7 +841,9 @@ static PROBE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 /// messbar). Danach zählt nur noch „hält Bilder fest“ als Sicherung: hing im Betrieb ein
 /// Bild, geht es zurück zum gleichmäßigen Bildstrom – nie von selbst wieder zurück.
 fn on_decoder_report(p: &[u8]) {
-    let Ok(j) = serde_json::from_slice::<serde_json::Value>(p) else { return };
+    let Ok(j) = serde_json::from_slice::<serde_json::Value>(p) else {
+        return;
+    };
     if let Some(reason) = j.get("failed").and_then(|v| v.as_str()) {
         // diese Stufe geht auf dem Tablet nicht – der Übertragungs-Thread nimmt die nächste
         let gen = j.get("gen").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
@@ -830,8 +858,14 @@ fn on_decoder_report(p: &[u8]) {
         crate::util::request_reconnect();
         return;
     }
-    let Some(prompt) = j.get("prompt").and_then(|v| v.as_bool()) else { return };
-    let Some(serial) = ACTIVE.lock().ok().and_then(|g| g.as_ref().map(|(_, s)| s.clone())) else {
+    let Some(prompt) = j.get("prompt").and_then(|v| v.as_bool()) else {
+        return;
+    };
+    let Some(serial) = ACTIVE
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|(_, s)| s.clone()))
+    else {
         return;
     };
     let store = |prompt: bool| {
@@ -844,7 +878,11 @@ fn on_decoder_report(p: &[u8]) {
     if video::is_probing() {
         crate::log!(
             "Dekoder des Tablets geprüft: {}",
-            if prompt { "gibt jedes Bild sofort aus" } else { "hält Bilder fest" }
+            if prompt {
+                "gibt jedes Bild sofort aus"
+            } else {
+                "hält Bilder fest"
+            }
         );
         store(prompt);
         video::set_probing(false);
@@ -947,7 +985,9 @@ impl InputReader {
                             }
                             let inj = injector
                                 .get_or_insert_with(|| crate::input::Injector::new(vd.clone()));
-                            inj.set_button_mode(crate::input::ButtonMode::from_config(&c.pen_button));
+                            inj.set_button_mode(crate::input::ButtonMode::from_config(
+                                &c.pen_button,
+                            ));
                             inj.handle(ev);
                         }
                     }
@@ -1021,12 +1061,18 @@ pub fn system_ending_soon(closing_us: bool) {
     if !crate::config::current().follow_pc_power {
         return;
     }
-    match Adb::shell_direct(&serial, "input keyevent KEYCODE_SLEEP", Duration::from_millis(1500)) {
+    match Adb::shell_direct(
+        &serial,
+        "input keyevent KEYCODE_SLEEP",
+        Duration::from_millis(1500),
+    ) {
         Ok(_) => {
             SLEPT_FOR_ENDING.store(true, Ordering::SeqCst);
             crate::log!("Windows wird beendet – Tablet-Display aus");
         }
-        Err(e) => crate::log!("Windows wird beendet – Tablet-Display ließ sich nicht ausschalten: {e:#}"),
+        Err(e) => {
+            crate::log!("Windows wird beendet – Tablet-Display ließ sich nicht ausschalten: {e:#}")
+        }
     }
 }
 
@@ -1048,7 +1094,11 @@ pub fn system_ending_cancelled() {
     crate::log!("Herunterfahren abgebrochen – Tablet-Display wieder an");
     if let Some((_, serial)) = ACTIVE.lock().ok().and_then(|g| g.clone()) {
         std::thread::spawn(move || {
-            let _ = Adb::shell_direct(&serial, "input keyevent KEYCODE_WAKEUP", Duration::from_secs(2));
+            let _ = Adb::shell_direct(
+                &serial,
+                "input keyevent KEYCODE_WAKEUP",
+                Duration::from_secs(2),
+            );
         });
     }
 }

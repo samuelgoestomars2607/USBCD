@@ -293,11 +293,19 @@ unsafe fn show_menu(hwnd: HWND) {
         .zip([
             tr("Weich (wenig Kraft nötig)", "Soft (little force needed)"),
             tr("Linear (Standard)", "Linear (default)"),
-            tr("Hart (feiner bei leichtem Druck)", "Firm (finer at light pressure)"),
+            tr(
+                "Hart (feiner bei leichtem Druck)",
+                "Firm (finer at light pressure)",
+            ),
         ])
         .enumerate()
     {
-        append(pen, check(cfg.pen_pressure == *curve), ID_PEN_BASE + i, label);
+        append(
+            pen,
+            check(cfg.pen_pressure == *curve),
+            ID_PEN_BASE + i,
+            label,
+        );
     }
 
     let pen_btn = CreatePopupMenu();
@@ -605,7 +613,11 @@ unsafe fn load_tray_icon() -> bool {
         return false;
     }
     let dir = crate::config::exe_dir();
-    let mut path = dir.join(if mode == 1 { "USBCD-tray.ico" } else { "USBCD-tray-light.ico" });
+    let mut path = dir.join(if mode == 1 {
+        "USBCD-tray.ico"
+    } else {
+        "USBCD-tray-light.ico"
+    });
     if !path.exists() {
         path = dir.join("USBCD.ico");
     }
@@ -962,7 +974,10 @@ fn set_device(serial: &str, name: &str, use_it: bool) {
             .map(|d| d.name.clone())
             .unwrap_or_else(|| name.to_string());
         let decoder_prompt = c.devices.get(serial).and_then(|d| d.decoder_prompt);
-        let stream_fallback = c.devices.get(serial).and_then(|d| d.stream_fallback.clone());
+        let stream_fallback = c
+            .devices
+            .get(serial)
+            .and_then(|d| d.stream_fallback.clone());
         c.devices.insert(
             serial.to_string(),
             crate::config::KnownDevice {

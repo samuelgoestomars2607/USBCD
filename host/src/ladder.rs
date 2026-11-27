@@ -42,7 +42,11 @@ impl Step {
     pub fn label(&self) -> String {
         format!(
             "{} {} {}x{} @ {}",
-            if self.codec == "hevc" { "HEVC" } else { "H.264" },
+            if self.codec == "hevc" {
+                "HEVC"
+            } else {
+                "H.264"
+            },
             if self.hw { "Hardware" } else { "Software" },
             self.width,
             self.height,
@@ -226,7 +230,12 @@ pub fn signature(app_version: u64, build: &str) -> String {
 }
 
 /// Wo beginnen? Index in `steps`; `None` = gemerkt, dass nichts geht.
-pub fn start_index(steps: &[Step], remembered: Option<&Fallback>, sig: &str, now: u64) -> Option<usize> {
+pub fn start_index(
+    steps: &[Step],
+    remembered: Option<&Fallback>,
+    sig: &str,
+    now: u64,
+) -> Option<usize> {
     let Some(f) = remembered else { return Some(0) };
     if f.sig != sig || now.saturating_sub(f.since) > REMEMBER_SECS {
         return Some(0);
@@ -391,8 +400,14 @@ mod tests {
         };
         assert_eq!(start_index(&s, Some(&f), &sig, 2000), Some(1));
         // andere App-/Android-Version oder zu alt → wieder von oben
-        assert_eq!(start_index(&s, Some(&f), &signature(22, "x"), 2000), Some(0));
-        assert_eq!(start_index(&s, Some(&f), &sig, 1000 + REMEMBER_SECS + 1), Some(0));
+        assert_eq!(
+            start_index(&s, Some(&f), &signature(22, "x"), 2000),
+            Some(0)
+        );
+        assert_eq!(
+            start_index(&s, Some(&f), &sig, 1000 + REMEMBER_SECS + 1),
+            Some(0)
+        );
         // gemerkte Stufe gibt es nicht mehr → oben
         let gone = Fallback {
             step: Some(Step {

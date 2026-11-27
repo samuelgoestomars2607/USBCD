@@ -130,7 +130,10 @@ fn track_loop(path: &str, shared: &(std::sync::Mutex<TrackState>, std::sync::Con
             continue;
         }
         // Server zuerst starten – er soll nicht an USBCD gebunden sein
-        let _ = Adb { path: path.to_string() }.run(&["start-server"]);
+        let _ = Adb {
+            path: path.to_string(),
+        }
+        .run(&["start-server"]);
         let child = command(path)
             .arg("track-devices")
             .stdin(std::process::Stdio::null())

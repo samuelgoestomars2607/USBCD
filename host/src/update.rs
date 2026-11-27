@@ -885,7 +885,9 @@ mod tests {
         assert!(parse_signed(&format!("{text}extra 1\n")).is_none());
         assert!(parse_signed(&text.replace(&format!("sha256 {sha}\n"), "")).is_none());
         assert!(parse_signed(&text.replace("version 0.6.15", "version 0.6.15-beta")).is_none());
-        assert!(parse_signed(&text.replace("file USBCD-Setup-0.6.15.exe", "file ..\\x.exe")).is_none());
+        assert!(
+            parse_signed(&text.replace("file USBCD-Setup-0.6.15.exe", "file ..\\x.exe")).is_none()
+        );
         assert!(parse_signed(&text.replace("signature ", "signature  ")).is_none());
     }
 

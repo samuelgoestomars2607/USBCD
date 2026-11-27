@@ -161,8 +161,11 @@ impl Default for Config {
                 "Virtual Audio Driver".into(),
             ],
             auto_switch_audio: false,
-            audio_device_rename: crate::i18n::tr("USBCD Tablet Lautsprecher", "USBCD Tablet Speakers")
-                .into(),
+            audio_device_rename: crate::i18n::tr(
+                "USBCD Tablet Lautsprecher",
+                "USBCD Tablet Speakers",
+            )
+            .into(),
             volume_mode: "auto".into(),
             hide_cable_output: true,
             display_position: None,

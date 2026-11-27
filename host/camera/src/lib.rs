@@ -21,7 +21,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::*;
-use windows::Win32::Media::KernelStreaming::{IKsControl, IKsControl_Impl, KSIDENTIFIER, PINNAME_VIDEO_CAPTURE};
+use windows::Win32::Media::KernelStreaming::{
+    IKsControl, IKsControl_Impl, KSIDENTIFIER, PINNAME_VIDEO_CAPTURE,
+};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::Storage::FileSystem::*;
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
@@ -72,8 +74,13 @@ fn log(msg: &str) {
     let Some(dir) = std::env::var_os("ProgramData") else {
         return;
     };
-    let path = std::path::PathBuf::from(dir).join("USBCD").join("kamera.log");
-    if std::fs::metadata(&path).map(|m| m.len() > 512 << 10).unwrap_or(false) {
+    let path = std::path::PathBuf::from(dir)
+        .join("USBCD")
+        .join("kamera.log");
+    if std::fs::metadata(&path)
+        .map(|m| m.len() > 512 << 10)
+        .unwrap_or(false)
+    {
         let _ = std::fs::write(&path, b"");
     }
     // nur eine vom Setup angelegte Datei beschreiben (keine neuen Dateien anlegen)
@@ -261,7 +268,9 @@ impl Pump {
                 let Ok(g) = feed.state.lock() else { break };
                 let Ok((g, _)) = feed
                     .cv
-                    .wait_timeout_while(g, Duration::from_millis(100), |s| s.seq == seen && !s.stop)
+                    .wait_timeout_while(g, Duration::from_millis(100), |s| {
+                        s.seq == seen && !s.stop
+                    })
                 else {
                     break;
                 };
@@ -439,20 +448,40 @@ impl IMFMediaEventGenerator_Impl for Stream_Impl {
         let q = self.queue.clone();
         unsafe { q.GetEvent(dwflags.0) }
     }
-    fn BeginGetEvent(&self, pcallback: Ref<'_, IMFAsyncCallback>, punkstate: Ref<'_, IUnknown>) -> Result<()> {
-        unsafe { self.queue.BeginGetEvent(pcallback.as_ref(), punkstate.as_ref()) }
+    fn BeginGetEvent(
+        &self,
+        pcallback: Ref<'_, IMFAsyncCallback>,
+        punkstate: Ref<'_, IUnknown>,
+    ) -> Result<()> {
+        unsafe {
+            self.queue
+                .BeginGetEvent(pcallback.as_ref(), punkstate.as_ref())
+        }
     }
     fn EndGetEvent(&self, presult: Ref<'_, IMFAsyncResult>) -> Result<IMFMediaEvent> {
         unsafe { self.queue.EndGetEvent(presult.as_ref()) }
     }
-    fn QueueEvent(&self, met: u32, guidextendedtype: *const GUID, hrstatus: HRESULT, pvvalue: *const PROPVARIANT) -> Result<()> {
-        unsafe { self.queue.QueueEventParamVar(met, guidextendedtype, hrstatus, pvvalue) }
+    fn QueueEvent(
+        &self,
+        met: u32,
+        guidextendedtype: *const GUID,
+        hrstatus: HRESULT,
+        pvvalue: *const PROPVARIANT,
+    ) -> Result<()> {
+        unsafe {
+            self.queue
+                .QueueEventParamVar(met, guidextendedtype, hrstatus, pvvalue)
+        }
     }
 }
 
 impl IMFMediaStream_Impl for Stream_Impl {
     fn GetMediaSource(&self) -> Result<IMFMediaSource> {
-        self.source.lock().ok().and_then(|g| g.clone()).ok_or_else(shut)
+        self.source
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .ok_or_else(shut)
     }
     fn GetStreamDescriptor(&self) -> Result<IMFStreamDescriptor> {
         if self.shutdown.load(Ordering::SeqCst) {
@@ -464,7 +493,11 @@ impl IMFMediaStream_Impl for Stream_Impl {
         if self.shutdown.load(Ordering::SeqCst) {
             return Err(shut());
         }
-        let running = self.state.lock().map(|g| *g == MF_STREAM_STATE_RUNNING).unwrap_or(false);
+        let running = self
+            .state
+            .lock()
+            .map(|g| *g == MF_STREAM_STATE_RUNNING)
+            .unwrap_or(false);
         if !running {
             return Err(Error::from(MF_E_MEDIA_SOURCE_WRONGSTATE));
         }
@@ -481,7 +514,11 @@ impl IMFMediaStream2_Impl for Stream_Impl {
         if self.shutdown.load(Ordering::SeqCst) {
             return Err(shut());
         }
-        Ok(self.state.lock().map(|g| *g).unwrap_or(MF_STREAM_STATE_STOPPED))
+        Ok(self
+            .state
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(MF_STREAM_STATE_STOPPED))
     }
 }
 
@@ -513,7 +550,10 @@ impl Source {
             shutdown: AtomicBool::new(false),
         });
         if let Ok(mut g) = stream.source.lock() {
-            *g = Some(src.to_interface::<IMFMediaSourceEx>().cast::<IMFMediaSource>()?);
+            *g = Some(
+                src.to_interface::<IMFMediaSourceEx>()
+                    .cast::<IMFMediaSource>()?,
+            );
         }
         Ok(src.to_interface())
     }
@@ -522,7 +562,11 @@ impl Source {
         if self.shutdown.load(Ordering::SeqCst) {
             return Err(shut());
         }
-        self.stream.lock().ok().and_then(|g| g.clone()).ok_or_else(shut)
+        self.stream
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .ok_or_else(shut)
     }
 }
 
@@ -531,14 +575,30 @@ impl IMFMediaEventGenerator_Impl for Source_Impl {
         let q = self.queue.clone();
         unsafe { q.GetEvent(dwflags.0) }
     }
-    fn BeginGetEvent(&self, pcallback: Ref<'_, IMFAsyncCallback>, punkstate: Ref<'_, IUnknown>) -> Result<()> {
-        unsafe { self.queue.BeginGetEvent(pcallback.as_ref(), punkstate.as_ref()) }
+    fn BeginGetEvent(
+        &self,
+        pcallback: Ref<'_, IMFAsyncCallback>,
+        punkstate: Ref<'_, IUnknown>,
+    ) -> Result<()> {
+        unsafe {
+            self.queue
+                .BeginGetEvent(pcallback.as_ref(), punkstate.as_ref())
+        }
     }
     fn EndGetEvent(&self, presult: Ref<'_, IMFAsyncResult>) -> Result<IMFMediaEvent> {
         unsafe { self.queue.EndGetEvent(presult.as_ref()) }
     }
-    fn QueueEvent(&self, met: u32, guidextendedtype: *const GUID, hrstatus: HRESULT, pvvalue: *const PROPVARIANT) -> Result<()> {
-        unsafe { self.queue.QueueEventParamVar(met, guidextendedtype, hrstatus, pvvalue) }
+    fn QueueEvent(
+        &self,
+        met: u32,
+        guidextendedtype: *const GUID,
+        hrstatus: HRESULT,
+        pvvalue: *const PROPVARIANT,
+    ) -> Result<()> {
+        unsafe {
+            self.queue
+                .QueueEventParamVar(met, guidextendedtype, hrstatus, pvvalue)
+        }
     }
 }
 
@@ -553,7 +613,12 @@ impl IMFMediaSource_Impl for Source_Impl {
         unsafe { self.pd.Clone() }
     }
 
-    fn Start(&self, ppresentationdescriptor: Ref<'_, IMFPresentationDescriptor>, pguidtimeformat: *const GUID, pvarstartposition: *const PROPVARIANT) -> Result<()> {
+    fn Start(
+        &self,
+        ppresentationdescriptor: Ref<'_, IMFPresentationDescriptor>,
+        pguidtimeformat: *const GUID,
+        pvarstartposition: *const PROPVARIANT,
+    ) -> Result<()> {
         let stream = self.check()?;
         unsafe {
             if !pguidtimeformat.is_null() && *pguidtimeformat != GUID::zeroed() {
@@ -570,7 +635,8 @@ impl IMFMediaSource_Impl for Source_Impl {
                 } else {
                     MENewStream
                 };
-                self.queue.QueueEventParamUnk(met.0 as u32, &GUID::zeroed(), S_OK, &unk)?;
+                self.queue
+                    .QueueEventParamUnk(met.0 as u32, &GUID::zeroed(), S_OK, &unk)?;
                 stream.start(pvarstartposition)?;
             } else {
                 stream.stop()?;
@@ -633,7 +699,12 @@ impl IMFMediaSourceEx_Impl for Source_Impl {
 }
 
 impl IMFGetService_Impl for Source_Impl {
-    fn GetService(&self, _guidservice: *const GUID, _riid: *const GUID, _ppvobject: *mut *mut c_void) -> Result<()> {
+    fn GetService(
+        &self,
+        _guidservice: *const GUID,
+        _riid: *const GUID,
+        _ppvobject: *mut *mut c_void,
+    ) -> Result<()> {
         Err(Error::from(MF_E_UNSUPPORTED_SERVICE))
     }
 }
@@ -644,13 +715,34 @@ fn not_found() -> Error {
 
 impl IKsControl_Impl for Source_Impl {
     // keine Kamera-Einstellungen (Zoom, Fokus …) – wie eine einfache Webcam
-    fn KsProperty(&self, _p: *const KSIDENTIFIER, _pl: u32, _d: *mut c_void, _dl: u32, _r: *mut u32) -> Result<()> {
+    fn KsProperty(
+        &self,
+        _p: *const KSIDENTIFIER,
+        _pl: u32,
+        _d: *mut c_void,
+        _dl: u32,
+        _r: *mut u32,
+    ) -> Result<()> {
         Err(not_found())
     }
-    fn KsMethod(&self, _p: *const KSIDENTIFIER, _pl: u32, _d: *mut c_void, _dl: u32, _r: *mut u32) -> Result<()> {
+    fn KsMethod(
+        &self,
+        _p: *const KSIDENTIFIER,
+        _pl: u32,
+        _d: *mut c_void,
+        _dl: u32,
+        _r: *mut u32,
+    ) -> Result<()> {
         Err(not_found())
     }
-    fn KsEvent(&self, _p: *const KSIDENTIFIER, _pl: u32, _d: *mut c_void, _dl: u32, _r: *mut u32) -> Result<()> {
+    fn KsEvent(
+        &self,
+        _p: *const KSIDENTIFIER,
+        _pl: u32,
+        _d: *mut c_void,
+        _dl: u32,
+        _r: *mut u32,
+    ) -> Result<()> {
         Err(not_found())
     }
 }
@@ -812,7 +904,12 @@ impl IMFAttributes_Impl for Activator_Impl {
 struct Factory;
 
 impl IClassFactory_Impl for Factory_Impl {
-    fn CreateInstance(&self, outer: Ref<'_, IUnknown>, riid: *const GUID, ppv: *mut *mut c_void) -> Result<()> {
+    fn CreateInstance(
+        &self,
+        outer: Ref<'_, IUnknown>,
+        riid: *const GUID,
+        ppv: *mut *mut c_void,
+    ) -> Result<()> {
         if outer.is_some() {
             return Err(Error::from(CLASS_E_NOAGGREGATION));
         }
@@ -827,7 +924,11 @@ impl IClassFactory_Impl for Factory_Impl {
 /// # Safety
 /// Von COM aufgerufen.
 #[no_mangle]
-pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
+pub unsafe extern "system" fn DllGetClassObject(
+    rclsid: *const GUID,
+    riid: *const GUID,
+    ppv: *mut *mut c_void,
+) -> HRESULT {
     if ppv.is_null() || rclsid.is_null() {
         return E_POINTER;
     }

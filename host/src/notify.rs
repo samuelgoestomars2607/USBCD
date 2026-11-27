@@ -424,7 +424,10 @@ mod tests {
         );
         assert_eq!(parse_uri("usbcd:format?n=abc", "abc"), None);
         // „Bildschirme erweitern“ nur mit gültigem Kennwort
-        assert_eq!(parse_uri("usbcd:extend?n=abc", "abc"), Some(Action::ExtendDisplays));
+        assert_eq!(
+            parse_uri("usbcd:extend?n=abc", "abc"),
+            Some(Action::ExtendDisplays)
+        );
         assert_eq!(parse_uri("usbcd:extend?n=x", "abc"), None);
         assert_eq!(parse_uri("http:x", "abc"), None);
         assert_eq!(
@@ -435,9 +438,18 @@ mod tests {
             parse_uri("usbcd:update?act=skip&v=0.6.15&n=abc", "abc"),
             Some(Action::UpdateSkip("0.6.15".into()))
         );
-        assert_eq!(parse_uri("usbcd:update?act=install&v=0.6.15&n=x", "abc"), None);
-        assert_eq!(parse_uri("usbcd:update?act=install&v=..%2f&n=abc", "abc"), None);
-        assert_eq!(parse_uri("usbcd:update?act=run&v=0.6.15&n=abc", "abc"), None);
+        assert_eq!(
+            parse_uri("usbcd:update?act=install&v=0.6.15&n=x", "abc"),
+            None
+        );
+        assert_eq!(
+            parse_uri("usbcd:update?act=install&v=..%2f&n=abc", "abc"),
+            None
+        );
+        assert_eq!(
+            parse_uri("usbcd:update?act=run&v=0.6.15&n=abc", "abc"),
+            None
+        );
         assert_eq!(parse_uri("usbcd:none?n=", ""), None);
     }
 

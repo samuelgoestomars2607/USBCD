@@ -308,8 +308,14 @@ pub fn check_ffmpeg(path: &str) -> Result<bool> {
         s.contains("dup_frames"),
         std::sync::atomic::Ordering::Relaxed,
     );
-    GFX_SCALE_MODE.store(s.contains("scale_mode"), std::sync::atomic::Ordering::Relaxed);
-    GFX_PREMULT.store(s.contains("premultiplied"), std::sync::atomic::Ordering::Relaxed);
+    GFX_SCALE_MODE.store(
+        s.contains("scale_mode"),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    GFX_PREMULT.store(
+        s.contains("premultiplied"),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     Ok(s.contains("gfxcapture") && !s.to_lowercase().contains("unknown filter"))
 }
 
@@ -536,7 +542,10 @@ pub fn stream(cfg: &Config, p: &StreamParams, sock: &mut TcpStream) -> Result<St
         if last_report.elapsed().as_secs() >= 600 {
             let secs = last_report.elapsed().as_secs_f32();
             if is_sparse() {
-                crate::log!("Video: {:.1} Bilder/s (nur bei Änderungen)", frames as f32 / secs);
+                crate::log!(
+                    "Video: {:.1} Bilder/s (nur bei Änderungen)",
+                    frames as f32 / secs
+                );
             } else {
                 crate::log!("Video: {:.1} Bilder/s", frames as f32 / secs);
             }
@@ -584,7 +593,10 @@ mod tests {
     fn capture_on_render_gpu() {
         let cfg = Config::default();
         let a = ffmpeg_args(&cfg, &params(Some(0x10DE)));
-        let i = a.iter().position(|s| s == "-init_hw_device").expect("Gerät fehlt");
+        let i = a
+            .iter()
+            .position(|s| s == "-init_hw_device")
+            .expect("Gerät fehlt");
         assert_eq!(a[i + 1], "d3d11va=usbcd:,vendor_id=0x10de");
         assert_eq!(a[i + 2..i + 4], ["-filter_hw_device", "usbcd"]);
         // muss vor dem Filtergraphen stehen
@@ -598,13 +610,19 @@ mod tests {
         let cfg = Config::default();
         DUP_FRAMES.store(true, std::sync::atomic::Ordering::Relaxed);
         let mut p = params(None);
-        assert!(ffmpeg_args(&cfg, &p).iter().any(|s| s.contains(":dup_frames=1")));
+        assert!(ffmpeg_args(&cfg, &p)
+            .iter()
+            .any(|s| s.contains(":dup_frames=1")));
         p.dup_frames = false;
-        assert!(!ffmpeg_args(&cfg, &p).iter().any(|s| s.contains("dup_frames")));
+        assert!(!ffmpeg_args(&cfg, &p)
+            .iter()
+            .any(|s| s.contains("dup_frames")));
         // Prüfung: 5 Bilder/s mit Kopien, unabhängig vom Modus
         p.probe = true;
         let a = ffmpeg_args(&cfg, &p);
-        assert!(a.iter().any(|s| s.contains(":max_framerate=5:") && s.contains(":dup_frames=1")));
+        assert!(a
+            .iter()
+            .any(|s| s.contains(":max_framerate=5:") && s.contains(":dup_frames=1")));
     }
 
     #[test]
@@ -612,9 +630,13 @@ mod tests {
         let cfg = Config::default();
         GFX_SCALE_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
         let mut p = params(None);
-        assert!(ffmpeg_args(&cfg, &p).iter().any(|s| s.contains(":scale_mode=point")));
+        assert!(ffmpeg_args(&cfg, &p)
+            .iter()
+            .any(|s| s.contains(":scale_mode=point")));
         p.native = false; // muss skaliert werden → weich wie bisher
-        assert!(!ffmpeg_args(&cfg, &p).iter().any(|s| s.contains("scale_mode")));
+        assert!(!ffmpeg_args(&cfg, &p)
+            .iter()
+            .any(|s| s.contains("scale_mode")));
     }
 
     #[test]
@@ -623,10 +645,14 @@ mod tests {
         let mut p = params(None);
         p.encoder = Encoder::Qsv;
         let a = ffmpeg_args(&cfg, &p);
-        assert!(a.iter().any(|s| s.contains("vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited")));
+        assert!(a
+            .iter()
+            .any(|s| s.contains("vpp_qsv=format=nv12:out_color_matrix=bt709:out_range=limited")));
         p.encoder = Encoder::Software;
         let a = ffmpeg_args(&cfg, &p);
-        assert!(a.iter().any(|s| s.contains("setparams=colorspace=smpte170m:range=tv")));
+        assert!(a
+            .iter()
+            .any(|s| s.contains("setparams=colorspace=smpte170m:range=tv")));
         // keine Encoder-Option (würde ffmpeg als Vorgabe in den Filtergraphen tragen)
         assert!(!a.contains(&"-colorspace".to_string()));
     }
@@ -643,7 +669,9 @@ mod tests {
         assert_eq!(a[i + 1], "vbr");
         assert!(a.windows(2).any(|w| w[0] == "-cq" && w[1] == "19"));
         assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "0"));
-        assert!(a.windows(2).any(|w| w[0] == "-maxrate" && w[1] == "100000000"));
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "-maxrate" && w[1] == "100000000"));
         // andere Encoder: höchste Datenrate, gleichbleibend
         p.encoder = Encoder::Qsv;
         let a = ffmpeg_args(&cfg, &p);

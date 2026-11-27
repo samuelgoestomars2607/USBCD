@@ -48,7 +48,11 @@ pub enum TabletCam {
     Starting,
     /// wartet auf „Zulassen“ am Tablet
     Asking,
-    On { rotation: u32, width: u32, height: u32 },
+    On {
+        rotation: u32,
+        width: u32,
+        height: u32,
+    },
     Off,
     Denied,
     NoFrontCamera,
@@ -340,9 +344,17 @@ fn decoder_args(rotation: u32) -> Vec<String> {
     .map(|s| s.to_string())
     .chain([filter(rotation)])
     .chain(
-        ["-fps_mode", "passthrough", "-pix_fmt", "nv12", "-f", "rawvideo", "pipe:1"]
-            .iter()
-            .map(|s| s.to_string()),
+        [
+            "-fps_mode",
+            "passthrough",
+            "-pix_fmt",
+            "nv12",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
     )
     .collect()
 }
@@ -378,25 +390,27 @@ fn start_decoder(rotation: u32) {
         });
     }
     if let Some(mut out) = child.stdout.take() {
-        std::thread::spawn(move || {
-            loop {
-                let mut buf = vec![0u8; FRAME_LEN];
-                if out.read_exact(&mut buf).is_err() {
-                    break;
-                }
-                with(|s| {
-                    if GENERATION.load(Ordering::SeqCst) == gen {
-                        s.latest = Some((Arc::new(buf), Instant::now()));
-                        s.seq += 1;
-                    }
-                });
+        std::thread::spawn(move || loop {
+            let mut buf = vec![0u8; FRAME_LEN];
+            if out.read_exact(&mut buf).is_err() {
+                break;
             }
+            with(|s| {
+                if GENERATION.load(Ordering::SeqCst) == gen {
+                    s.latest = Some((Arc::new(buf), Instant::now()));
+                    s.seq += 1;
+                }
+            });
         });
     }
     if let Some(err) = child.stderr.take() {
         std::thread::spawn(move || {
             use std::io::BufRead;
-            for line in std::io::BufReader::new(err).lines().map_while(Result::ok).take(50) {
+            for line in std::io::BufReader::new(err)
+                .lines()
+                .map_while(Result::ok)
+                .take(50)
+            {
                 crate::log!("Webcam-FFmpeg: {line}");
             }
         });
@@ -469,8 +483,10 @@ mod dll {
             let (Some(s), Some(t)) = (s, t) else {
                 return Err("usbcd_cam.dll ist veraltet".into());
             };
-            let start: StartFn = std::mem::transmute::<unsafe extern "system" fn() -> isize, StartFn>(s);
-            let stop: StopFn = std::mem::transmute::<unsafe extern "system" fn() -> isize, StopFn>(t);
+            let start: StartFn =
+                std::mem::transmute::<unsafe extern "system" fn() -> isize, StartFn>(s);
+            let stop: StopFn =
+                std::mem::transmute::<unsafe extern "system" fn() -> isize, StopFn>(t);
             let n = crate::util::wide(name);
             let mut h: *mut c_void = std::ptr::null_mut();
             let hr = start(n.as_ptr(), &mut h);
@@ -667,7 +683,10 @@ fn placeholder_text(t: &TabletCam) -> (&'static str, &'static str) {
             "",
         ),
         TabletCam::Error => (
-            tr("Tablet-Kamera nicht verfügbar", "Tablet camera not available"),
+            tr(
+                "Tablet-Kamera nicht verfügbar",
+                "Tablet camera not available",
+            ),
             tr(
                 "Vielleicht benutzt eine andere App auf dem Tablet die Kamera",
                 "Another app on the tablet may be using the camera",
@@ -862,7 +881,9 @@ fn background(top: i32) -> Vec<u8> {
     for ly in 0..LOGO_SIZE {
         for lx in 0..LOGO_SIZE {
             let s = (ly * LOGO_SIZE + lx) * 4;
-            let Some(src) = LOGO.get(s..s + 4) else { continue };
+            let Some(src) = LOGO.get(s..s + 4) else {
+                continue;
+            };
             let a = src[3] as u32;
             if a == 0 || y0 + ly >= h {
                 continue;
@@ -1066,6 +1087,9 @@ mod tests {
     fn header_layout() {
         let h = header();
         assert_eq!(&h[..4], b"UCAM");
-        assert_eq!(u32::from_le_bytes([h[12], h[13], h[14], h[15]]) as usize, FRAME_LEN);
+        assert_eq!(
+            u32::from_le_bytes([h[12], h[13], h[14], h[15]]) as usize,
+            FRAME_LEN
+        );
     }
 }

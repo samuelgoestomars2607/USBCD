@@ -230,7 +230,10 @@ mod tests {
 
     #[test]
     fn converts_and_encodes() {
-        assert_eq!(bgrx_to_rgba(&[1, 2, 3, 0, 9, 8, 7, 0]), [3, 2, 1, 255, 7, 8, 9, 255]);
+        assert_eq!(
+            bgrx_to_rgba(&[1, 2, 3, 0, 9, 8, 7, 0]),
+            [3, 2, 1, 255, 7, 8, 9, 255]
+        );
         let rgba = vec![200u8; 4 * 4 * 4];
         let msg = encode(4, 4, &rgba);
         assert_eq!(&msg[..9], &[0, 0, 0, 4, 0, 0, 0, 4, FORMAT_RGBA_ZLIB]);

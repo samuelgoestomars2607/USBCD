@@ -31,7 +31,11 @@ fn replace_section(xml: &str, tag: &str, inner: &str) -> String {
 /// das entlastet den PC. Ganz ohne passende kleinere Größe bleibt 1080p als Rückfall.
 pub fn offered_modes(w: u32, h: u32, hz: u32) -> Vec<(u32, u32, u32)> {
     fn gcd(a: u32, b: u32) -> u32 {
-        if b == 0 { a } else { gcd(b, a % b) }
+        if b == 0 {
+            a
+        } else {
+            gcd(b, a % b)
+        }
     }
     let mut modes = vec![(w, h, hz)];
     let g = gcd(w, h).max(1);
@@ -271,21 +275,44 @@ mod tests {
     fn modes_keep_aspect() {
         assert_eq!(
             offered_modes(2000, 1200, 60),
-            vec![(2000, 1200, 60), (1600, 960, 60), (1280, 768, 60), (1000, 600, 60)]
+            vec![
+                (2000, 1200, 60),
+                (1600, 960, 60),
+                (1280, 768, 60),
+                (1000, 600, 60)
+            ]
         );
         assert_eq!(
             offered_modes(2560, 1600, 120),
-            vec![(2560, 1600, 120), (2048, 1280, 120), (1664, 1040, 120), (1280, 800, 120)]
+            vec![
+                (2560, 1600, 120),
+                (2048, 1280, 120),
+                (1664, 1040, 120),
+                (1280, 800, 120)
+            ]
         );
         // jedes Angebot im Seitenverhältnis des Tablets und gerade
-        for (w, h) in [(2000, 1200), (2560, 1600), (2340, 1080), (1920, 1200), (2800, 1752)] {
+        for (w, h) in [
+            (2000, 1200),
+            (2560, 1600),
+            (2340, 1080),
+            (1920, 1200),
+            (2800, 1752),
+        ] {
             for (mw, mh, _) in offered_modes(w, h, 60) {
-                assert_eq!(mw as u64 * h as u64, mh as u64 * w as u64, "{w}x{h} → {mw}x{mh}");
+                assert_eq!(
+                    mw as u64 * h as u64,
+                    mh as u64 * w as u64,
+                    "{w}x{h} → {mw}x{mh}"
+                );
                 assert!(mw % 2 == 0 && mh % 2 == 0 && mh >= 480);
             }
         }
         // ohne passende kleinere Größe: 1080p als Rückfall wie bisher
-        assert_eq!(offered_modes(1366, 768, 60), vec![(1366, 768, 60), (1920, 1080, 60)]);
+        assert_eq!(
+            offered_modes(1366, 768, 60),
+            vec![(1366, 768, 60), (1920, 1080, 60)]
+        );
     }
 
     #[test]

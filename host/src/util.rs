@@ -152,7 +152,11 @@ pub fn spawn_stream(cmd: &mut Command, boost: bool) -> std::io::Result<std::proc
                 if resume_threads(child.id()) {
                     crate::log!(
                         "Vorrang für ffmpeg: CPU {}",
-                        if cpu { "höher als normal" } else { "unverändert" }
+                        if cpu {
+                            "höher als normal"
+                        } else {
+                            "unverändert"
+                        }
                     );
                     raise_gpu_priority_soon(h);
                     return Ok(child);
@@ -273,9 +277,15 @@ unsafe fn raise_gpu_priority(h: std::os::windows::io::RawHandle) -> Result<Strin
     if lib.is_null() {
         return Err(NOT_FOUND);
     }
-    let set = GetProcAddress(lib, c"D3DKMTSetProcessSchedulingPriorityClass".as_ptr() as _)
-        .ok_or(NOT_FOUND)?;
-    let get = GetProcAddress(lib, c"D3DKMTGetProcessSchedulingPriorityClass".as_ptr() as _);
+    let set = GetProcAddress(
+        lib,
+        c"D3DKMTSetProcessSchedulingPriorityClass".as_ptr() as _,
+    )
+    .ok_or(NOT_FOUND)?;
+    let get = GetProcAddress(
+        lib,
+        c"D3DKMTGetProcessSchedulingPriorityClass".as_ptr() as _,
+    );
     let set: SetFn = std::mem::transmute(set);
     let st = set(h as _, HIGH);
     if st < 0 {
@@ -393,7 +403,13 @@ pub fn notify_with(
     // Fehler mit Ton und „Log öffnen“, Statusmeldungen leise
     let problem = matches!(
         key,
-        "failed" | "installfail" | "ffmpeg" | "helper" | "security" | "camera" | "notextended"
+        "failed"
+            | "installfail"
+            | "ffmpeg"
+            | "helper"
+            | "security"
+            | "camera"
+            | "notextended"
             | "updatefail"
     );
     if problem {
@@ -506,7 +522,9 @@ pub fn set_windows_ending(on: bool) {
 /// Fehlerfenster.
 pub fn may_spawn() -> std::io::Result<()> {
     if windows_ending() {
-        Err(std::io::Error::other("Windows wird beendet – kein Programmstart mehr"))
+        Err(std::io::Error::other(
+            "Windows wird beendet – kein Programmstart mehr",
+        ))
     } else {
         Ok(())
     }
