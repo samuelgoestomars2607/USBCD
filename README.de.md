@@ -376,12 +376,14 @@ Tablet-App** – das Skript warnt dann. Die Tablet-App lässt sich auch direkt �
 ```
 docs/       Animationen für diese README
 android/    Android-Studio-Projekt (Kotlin, keine Fremdbibliotheken)
-            MainActivity (Wartebildschirm, Helligkeit), LoaderView (Lade-Animation), Fonts,
-            DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
+            MainActivity (Verbindung, Helligkeit), LoadingScreen (Ladebildschirm), LoaderState,
+            Knot, KnotView, LoaderViews (Lade-Animation), Fonts, DisplayInfo, StreamServer,
+            VideoDecoder, AudioPlayer, Proto, Auth
             res/values (Englisch), res/values-de (Deutsch), adaptives Icon mit Monochrom-Ebene
-host/       Rust: main (Geräte-Schleife, App-Installation), tray (Menü), session, helper (Dienst
-            und Zugang), auth (Anmeldung), vdd, display, driver, video, still (verlustfreie
-            Standbilder), nal, audio, autostart, i18n, config, proto, adb, util
+host/       Rust: main (Start, Setup-Befehle), devices (Geräte-Erkennung, App-Installation),
+            tray (Menü), session (eine Verbindung), helper (Dienst und Zugang), auth (Anmeldung),
+            vdd, display, driver, video, still (verlustfreie Standbilder), nal, audio, autostart,
+            i18n, config, proto, adb, log, process, state, win (Windows-Bausteine)
 installer/  Setup bauen.cmd · build-installer.ps1 · USBCD.iss (de/en) · setup-helper.ps1 · diagnose.ps1
             · deps.lock.json (Prüfsummen) · Erklärseiten · THIRD-PARTY.txt
 ```

@@ -369,12 +369,14 @@ tablet app** – the script shows a warning. You can also install the tablet app
 ```
 docs/       Animations used in this README
 android/    Android Studio project (Kotlin, no third-party libraries)
-            MainActivity (waiting screen, brightness), LoaderView (loading animation), Fonts,
-            DisplayInfo, StreamServer, VideoDecoder, AudioPlayer, Proto, Auth
+            MainActivity (connection, brightness), LoadingScreen (loading screen), LoaderState,
+            Knot, KnotView, LoaderViews (loading animation), Fonts, DisplayInfo, StreamServer,
+            VideoDecoder, AudioPlayer, Proto, Auth
             res/values (English), res/values-de (German), adaptive icon with monochrome layer
-host/       Rust: main (device loop, app installation), tray (menu), session, helper (service
-            and access), auth (pairing), vdd, display, driver, video, still (lossless still
-            images), nal, audio, autostart, i18n, config, proto, adb, util
+host/       Rust: main (start, setup commands), devices (device detection, app installation),
+            tray (menu), session (one connection), helper (service and access), auth (pairing),
+            vdd, display, driver, video, still (lossless still images), nal, audio, autostart,
+            i18n, config, proto, adb, log, process, state, win (Windows building blocks)
 installer/  Setup bauen.cmd · build-installer.ps1 · USBCD.iss (de/en) · setup-helper.ps1 · diagnose.ps1
             · deps.lock.json (checksums) · info pages · THIRD-PARTY.txt
 ```

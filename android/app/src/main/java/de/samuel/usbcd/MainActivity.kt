@@ -23,7 +23,6 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
@@ -38,14 +37,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var stillView: ImageView
     /** Entpacken der Standbilder – nie im UI- oder Lese-Thread */
     private val stillDecode = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private lateinit var overlay: FrameLayout
-    private lateinit var statusView: TextView
-    private lateinit var detailView: TextView
-    private lateinit var footerView: TextView
-    /** Zustand des Ladebildschirms (Knoten, Morph, gedimmt) */
-    private val loader = LoaderState()
-    /** Erstes Videobild ist da, Ausblenden wartet nur noch auf das Ende des Morphs */
-    private var hidePending = false
+    private lateinit var loading: LoadingScreen
     private lateinit var mode: Display.Mode
     private var server: StreamServer? = null
     private var decoder: VideoDecoder? = null
@@ -98,7 +90,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             visibility = View.GONE
         }
         root.addView(stillView, FrameLayout.LayoutParams(-1, -1))
-        root.addView(buildOverlay(), FrameLayout.LayoutParams(-1, -1))
+        loading = LoadingScreen(this, mode, ui,
+            onShow = { showingVideo = false; hideStill() },
+            onHide = { showingVideo = true })
+        root.addView(loading.view, FrameLayout.LayoutParams(-1, -1))
         statsView = TextView(this).apply {
             typeface = Fonts.get(this@MainActivity, 500)
             textSize = 13f
@@ -119,9 +114,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
             topMargin = dp(24)
         })
         setContentView(root)
-        showWaiting()
+        loading.showWaiting()
 
-        val dec = VideoDecoder(decoders, modes.map { it.name }.toSet()) { runOnUiThread { hideOverlay() } }
+        val dec = VideoDecoder(decoders, modes.map { it.name }.toSet()) { runOnUiThread { loading.hide() } }
         dec.reporter = { type, payload -> server?.send(type, payload) }
         val aud = AudioPlayer(this)
         decoder = dec
@@ -142,14 +137,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
                     dnd.setActive(connected)
                     if (connected) {
                         unsupportedShown = false
-                        showConnecting(info)
+                        loading.showConnecting(info)
                     } else if (!unsupportedShown) {
-                        showWaiting() // der Hinweis „nicht unterstützt“ bleibt stehen
+                        loading.showWaiting() // der Hinweis „nicht unterstützt“ bleibt stehen
                     }
                 }
             },
             onSettings = { s -> runOnUiThread { applySettings(s) } },
-            onBlocked = { blocked -> runOnUiThread { if (blocked) showBlocked() else showWaiting() } },
+            onBlocked = { blocked -> runOnUiThread { if (blocked) loading.showBlocked() else loading.showWaiting() } },
             onCamera = { j -> camera?.control(j) },
             onVolume = { j -> runOnUiThread { showVolume(j) } },
             onUnsupported = { runOnUiThread { showUnsupported() } },
@@ -364,123 +359,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun text(weight: Int, sizeSp: Float, color: Int) = TextView(this).apply {
-        typeface = Fonts.get(this@MainActivity, weight)
-        textSize = sizeSp
-        setTextColor(color)
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-    }
-
-    /**
-     * Ladebildschirm über dem Videobild: Knoten als Loader mit Schein dahinter, Status, Hinweis
-     * und unten eine Fußzeile mit Name und Display-Daten.
-     */
-    private fun buildOverlay(): View {
-        val primary = getColor(R.color.text_primary)
-        val secondary = getColor(R.color.text_secondary)
-        val muted = getColor(R.color.text_muted)
-        overlay = FrameLayout(this)
-
-        val knotBox = FrameLayout(this)
-        val knotView = KnotView(this, loader)
-        val logoView = LogoRevealView(this, loader)
-        knotBox.addView(knotView, FrameLayout.LayoutParams(-1, -1))
-        knotBox.addView(logoView, FrameLayout.LayoutParams(-1, -1))
-        val backdrop = LoaderBackdrop(this, loader, knotBox)
-        overlay.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
-        loader.onChange {
-            knotView.kick()
-            backdrop.invalidate()
-            logoView.invalidate()
-        }
-
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        column.addView(knotBox, LinearLayout.LayoutParams(dp(250), dp(250)))
-        statusView = text(500, 28f, primary)
-        column.addView(statusView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(40) })
-        detailView = text(400, 16f, secondary).apply { setLineSpacing(0f, 1.4f) }
-        column.addView(detailView, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16) })
-        overlay.addView(column, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER).apply {
-            leftMargin = dp(32); rightMargin = dp(32); bottomMargin = dp(32)
-        })
-
-        val footer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        footer.addView(text(700, 12f, muted).apply {
-            text = getString(R.string.app_name)
-            letterSpacing = 0.32f
-        })
-        footerView = text(400, 12f, muted)
-        footer.addView(footerView, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
-        overlay.addView(footer, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            bottomMargin = dp(36)
-        })
-        val (w, h) = DisplayInfo.landscapeSize(mode)
-        footerView.text = "·   " + getString(R.string.display_info, w, h, "%.0f".format(mode.refreshRate))
-        return overlay
-    }
-
-    private fun showOverlay() {
-        showingVideo = false
-        hidePending = false
-        hideStill()
-        overlay.animate().cancel()
-        overlay.alpha = 1f
-        overlay.visibility = View.VISIBLE
-    }
-
-    /** Erstes Videobild: ausblenden – läuft gerade der Morph zum Croissant, erst wenn er fertig ist. */
-    private fun hideOverlay() {
-        if (loader.mode == LoaderState.Mode.MORPH && !loader.morphDone(android.os.SystemClock.uptimeMillis())) {
-            hidePending = true
-            return
-        }
-        showingVideo = true
-        hidePending = false
-        overlay.animate().alpha(0f).setDuration(250).withEndAction { overlay.visibility = View.GONE }.start()
-    }
-
-    private val morphFinished = Runnable { if (hidePending) hideOverlay() }
-
-    private fun showWaiting() {
-        showOverlay()
-        loader.toWait()
-        statusView.text = getString(R.string.waiting)
-        detailView.text = getString(R.string.waiting_detail)
-    }
-
-    private fun showBlocked() {
-        showOverlay()
-        loader.toDim()
-        statusView.text = getString(R.string.port_busy)
-        detailView.text = getString(R.string.port_busy_detail)
-    }
-
     /** Hinweis „Bild nicht unterstützt“ steht (bleibt auch nach dem Trennen) */
     private var unsupportedShown = false
 
     /** Kein Decoder dieses Tablets kann das Bild anzeigen – klar sagen statt schwarzem Bild. */
     private fun showUnsupported() {
         unsupportedShown = true
-        showOverlay()
-        loader.toDim()
-        statusView.text = getString(R.string.unsupported)
-        detailView.text = getString(R.string.unsupported_detail)
-    }
-
-    private fun showConnecting(info: String) {
-        showOverlay()
-        loader.toMorph()
-        ui.removeCallbacks(morphFinished)
-        ui.postDelayed(morphFinished, LoaderState.DONE_MS + 20)
-        statusView.text = getString(R.string.connected)
-        detailView.text = getString(R.string.starting, info)
+        loading.showUnsupported()
     }
 
     /** Einstellungen vom PC (Taskleisten-Menü), z. B. Helligkeit. */
