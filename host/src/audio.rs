@@ -580,58 +580,9 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
     let _mmcss = MmcssAudio::register();
     crate::process::high_qos_current_thread();
     unsafe {
-        let activate: unsafe extern "system" fn(
-            P,
-            *const GUID,
-            u32,
-            *const c_void,
-            *mut P,
-        ) -> HRESULT = dev.f(3);
-
         // IAudioClient2 bevorzugt: damit lässt sich "nach Lautstärke" abgreifen,
         // dann wirkt der Windows-Lautstärkeregler automatisch.
-        let mut p: P = std::ptr::null_mut();
-        let mut post_volume = false;
-        let client = if activate(
-            dev.0,
-            &IID_IAUDIO_CLIENT2,
-            CLSCTX_ALL,
-            std::ptr::null(),
-            &mut p,
-        ) >= 0
-        {
-            let c = Com(p);
-            if cfg.volume_mode == VolumeMode::Auto {
-                #[repr(C)]
-                struct Props {
-                    cb: u32,
-                    offload: i32,
-                    category: i32,
-                    options: i32,
-                }
-                let props = Props {
-                    cb: 16,
-                    offload: 0,
-                    category: 0,
-                    options: AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK,
-                };
-                let set_props: unsafe extern "system" fn(P, *const Props) -> HRESULT = c.f(16);
-                post_volume = set_props(c.0, &props) >= 0;
-            }
-            c
-        } else {
-            check(
-                activate(
-                    dev.0,
-                    &IID_IAUDIO_CLIENT,
-                    CLSCTX_ALL,
-                    std::ptr::null(),
-                    &mut p,
-                ),
-                "IAudioClient",
-            )?;
-            Com(p)
-        };
+        let (client, post_volume) = open_client(dev, cfg.volume_mode)?;
 
         let manual_volume = match cfg.volume_mode {
             VolumeMode::Off => false,
@@ -639,19 +590,7 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
             VolumeMode::Auto => !post_volume,
         };
         let volume = if manual_volume {
-            let mut v: P = std::ptr::null_mut();
-            if activate(
-                dev.0,
-                &IID_IAUDIO_ENDPOINT_VOLUME,
-                CLSCTX_ALL,
-                std::ptr::null(),
-                &mut v,
-            ) >= 0
-            {
-                Some(Com(v))
-            } else {
-                None
-            }
+            device_volume(dev)
         } else {
             None
         };
@@ -659,15 +598,12 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
         let get_mix: unsafe extern "system" fn(P, *mut *mut u8) -> HRESULT = client.f(8);
         let mut fmt: *mut u8 = std::ptr::null_mut();
         check(get_mix(client.0, &mut fmt), "GetMixFormat")?;
-        let tag: u16 = rd(fmt, 0);
-        let channels: u16 = rd(fmt, 2);
-        let rate: u32 = rd(fmt, 4);
-        let bits: u16 = rd(fmt, 14);
-        let is_float = match tag {
-            3 => true,
-            0xFFFE => rd::<u32>(fmt, 24) == 3,
-            _ => false,
-        };
+        let MixFormat {
+            channels,
+            rate,
+            bits,
+            is_float,
+        } = MixFormat::read(fmt);
         let init: unsafe extern "system" fn(
             P,
             i32,
@@ -774,16 +710,7 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
             if let Some(v) = &volume {
                 if last_vol.is_none_or(|t| t.elapsed() > Duration::from_millis(100)) {
                     last_vol = Some(Instant::now());
-                    let get_db: unsafe extern "system" fn(P, *mut f32) -> HRESULT = v.f(8);
-                    let get_mute: unsafe extern "system" fn(P, *mut i32) -> HRESULT = v.f(15);
-                    let (mut db, mut mute) = (0f32, 0i32);
-                    get_db(v.0, &mut db);
-                    get_mute(v.0, &mut mute);
-                    gain = if mute != 0 {
-                        0.0
-                    } else {
-                        10f32.powf(db / 20.0)
-                    };
+                    gain = windows_gain(v);
                 }
             }
             let mut sent_err = None;
@@ -810,22 +737,7 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
                         let s = if silent {
                             0.0
                         } else {
-                            let off = f * frame_bytes + c * bytes_per_sample;
-                            match (is_float, bits) {
-                                (true, 32) => rd::<f32>(data, off),
-                                (false, 16) => rd::<i16>(data, off) as f32 / 32768.0,
-                                (false, 32) => rd::<i32>(data, off) as f32 / 2147483648.0,
-                                (false, 24) => {
-                                    let b = [
-                                        0,
-                                        rd::<u8>(data, off),
-                                        rd::<u8>(data, off + 1),
-                                        rd::<u8>(data, off + 2),
-                                    ];
-                                    i32::from_le_bytes(b) as f32 / 2147483648.0
-                                }
-                                _ => 0.0,
-                            }
+                            sample(data, f * frame_bytes + c * bytes_per_sample, is_float, bits)
                         };
                         let v = (s * gain).clamp(-1.0, 1.0);
                         pcm.extend_from_slice(&((v * 32767.0) as i16).to_le_bytes());
@@ -854,6 +766,139 @@ fn capture_loop(cfg: &Config, dev: &Com, mut sock: TcpStream, stop: &AtomicBool)
         };
         stop_fn(client.0);
         result
+    }
+}
+
+/// IAudioClient.Activate des Geräts (Vtable-Eintrag 3 von IMMDevice).
+type Activate = unsafe extern "system" fn(P, *const GUID, u32, *const c_void, *mut P) -> HRESULT;
+
+/// Aufnahme-Client öffnen: IAudioClient2 bevorzugt, damit Windows die Lautstärke selbst
+/// einrechnet („nach Lautstärke“ abgreifen, nur bei `volume_mode = "auto"`).
+/// Liefert den Client und ob Windows die Lautstärke einrechnet.
+unsafe fn open_client(dev: &Com, mode: VolumeMode) -> Result<(Com, bool)> {
+    let activate: Activate = dev.f(3);
+    let mut p: P = std::ptr::null_mut();
+    let mut post_volume = false;
+    let client = if activate(
+        dev.0,
+        &IID_IAUDIO_CLIENT2,
+        CLSCTX_ALL,
+        std::ptr::null(),
+        &mut p,
+    ) >= 0
+    {
+        let c = Com(p);
+        if mode == VolumeMode::Auto {
+            #[repr(C)]
+            struct Props {
+                cb: u32,
+                offload: i32,
+                category: i32,
+                options: i32,
+            }
+            let props = Props {
+                cb: 16,
+                offload: 0,
+                category: 0,
+                options: AUDCLNT_STREAMOPTIONS_POST_VOLUME_LOOPBACK,
+            };
+            let set_props: unsafe extern "system" fn(P, *const Props) -> HRESULT = c.f(16);
+            post_volume = set_props(c.0, &props) >= 0;
+        }
+        c
+    } else {
+        check(
+            activate(
+                dev.0,
+                &IID_IAUDIO_CLIENT,
+                CLSCTX_ALL,
+                std::ptr::null(),
+                &mut p,
+            ),
+            "IAudioClient",
+        )?;
+        Com(p)
+    };
+    Ok((client, post_volume))
+}
+
+/// Lautstärkeregler des Geräts (IAudioEndpointVolume), falls verfügbar.
+unsafe fn device_volume(dev: &Com) -> Option<Com> {
+    let activate: Activate = dev.f(3);
+    let mut v: P = std::ptr::null_mut();
+    if activate(
+        dev.0,
+        &IID_IAUDIO_ENDPOINT_VOLUME,
+        CLSCTX_ALL,
+        std::ptr::null(),
+        &mut v,
+    ) >= 0
+    {
+        Some(Com(v))
+    } else {
+        None
+    }
+}
+
+/// Aktuelle Windows-Lautstärke als Faktor (stumm = 0).
+unsafe fn windows_gain(v: &Com) -> f32 {
+    let get_db: unsafe extern "system" fn(P, *mut f32) -> HRESULT = v.f(8);
+    let get_mute: unsafe extern "system" fn(P, *mut i32) -> HRESULT = v.f(15);
+    let (mut db, mut mute) = (0f32, 0i32);
+    get_db(v.0, &mut db);
+    get_mute(v.0, &mut mute);
+    if mute != 0 {
+        0.0
+    } else {
+        10f32.powf(db / 20.0)
+    }
+}
+
+/// Tonformat des Geräts (aus WAVEFORMATEX bzw. WAVEFORMATEXTENSIBLE).
+struct MixFormat {
+    channels: u16,
+    rate: u32,
+    bits: u16,
+    is_float: bool,
+}
+
+impl MixFormat {
+    /// # Safety
+    /// `fmt` zeigt auf ein WAVEFORMATEX von Windows (bei Tag 0xFFFE: WAVEFORMATEXTENSIBLE).
+    unsafe fn read(fmt: *const u8) -> MixFormat {
+        let tag: u16 = rd(fmt, 0);
+        MixFormat {
+            channels: rd(fmt, 2),
+            rate: rd(fmt, 4),
+            bits: rd(fmt, 14),
+            is_float: match tag {
+                3 => true,
+                0xFFFE => rd::<u32>(fmt, 24) == 3,
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Ein Sample als Zahl zwischen −1 und 1 (float 32, int 16/24/32; anderes: Stille).
+///
+/// # Safety
+/// An `data + off` stehen mindestens `bits / 8` lesbare Bytes.
+unsafe fn sample(data: *const u8, off: usize, is_float: bool, bits: u16) -> f32 {
+    match (is_float, bits) {
+        (true, 32) => rd::<f32>(data, off),
+        (false, 16) => rd::<i16>(data, off) as f32 / 32768.0,
+        (false, 32) => rd::<i32>(data, off) as f32 / 2147483648.0,
+        (false, 24) => {
+            let b = [
+                0,
+                rd::<u8>(data, off),
+                rd::<u8>(data, off + 1),
+                rd::<u8>(data, off + 2),
+            ];
+            i32::from_le_bytes(b) as f32 / 2147483648.0
+        }
+        _ => 0.0,
     }
 }
 
@@ -961,13 +1006,7 @@ fn endpoint_volume() -> Result<Com> {
     let en = Enumerator::new()?;
     let ep = find_endpoint(&cfg.audio_device_match, &en)?;
     unsafe {
-        let activate: unsafe extern "system" fn(
-            P,
-            *const GUID,
-            u32,
-            *const c_void,
-            *mut P,
-        ) -> HRESULT = ep.dev.f(3);
+        let activate: Activate = ep.dev.f(3);
         let mut v: P = std::ptr::null_mut();
         check(
             activate(
@@ -1017,6 +1056,28 @@ pub fn list_devices() -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    /// Umrechnung der Sample-Formate (Windows liefert je nach Gerät float oder Ganzzahlen).
+    #[test]
+    fn sample_formats() {
+        unsafe {
+            let f = 0.5f32.to_le_bytes();
+            assert_eq!(super::sample(f.as_ptr(), 0, true, 32), 0.5);
+            let i = i16::MIN.to_le_bytes();
+            assert_eq!(super::sample(i.as_ptr(), 0, false, 16), -1.0);
+            let i = 16384i16.to_le_bytes();
+            assert_eq!(super::sample(i.as_ptr(), 0, false, 16), 0.5);
+            // 24 Bit: 0x400000 = halbe Vollaussteuerung
+            let b = [0x00, 0x00, 0x40];
+            assert_eq!(super::sample(b.as_ptr(), 0, false, 24), 0.5);
+            let b = [0x00, 0x00, 0xC0];
+            assert_eq!(super::sample(b.as_ptr(), 0, false, 24), -0.5);
+            let i = (1i32 << 30).to_le_bytes();
+            assert_eq!(super::sample(i.as_ptr(), 0, false, 32), 0.5);
+            // unbekanntes Format → Stille
+            assert_eq!(super::sample(b.as_ptr(), 0, false, 8), 0.0);
+        }
+    }
+
     use super::*;
 
     #[test]
