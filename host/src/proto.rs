@@ -246,3 +246,87 @@ mod tests {
         assert!(read_frame(&mut &v[..]).is_ok());
     }
 }
+
+/// Abgleich mit der Tablet-App: `Proto.kt` und `Auth.kt` müssen dieselben Werte haben.
+/// Die Dateien werden beim Übersetzen der Tests eingelesen – eine Abweichung fällt sofort auf.
+#[cfg(test)]
+pub(crate) mod kotlin_sync {
+    use std::collections::HashMap;
+
+    pub const PROTO_KT: &str = include_str!("../../android/app/src/main/java/de/samuel/usbcd/Proto.kt");
+    pub const AUTH_KT: &str = include_str!("../../android/app/src/main/java/de/samuel/usbcd/Auth.kt");
+
+    /// `const val NAME = Wert` aus einer Kotlin-Datei (Dezimal, 0x…, `a shl b`).
+    pub fn kotlin_consts(src: &str) -> HashMap<String, u64> {
+        let num = |s: &str| -> Option<u64> {
+            let s = s.trim();
+            if let Some((a, b)) = s.split_once(" shl ") {
+                return Some(a.trim().parse::<u64>().ok()? << b.trim().parse::<u32>().ok()?);
+            }
+            match s.strip_prefix("0x") {
+                Some(h) => u64::from_str_radix(h, 16).ok(),
+                None => s.parse().ok(),
+            }
+        };
+        src.lines()
+            .filter_map(|l| l.trim().strip_prefix("const val "))
+            .filter_map(|l| {
+                let (name, val) = l.split_once('=')?;
+                Some((name.trim().to_string(), num(val)?))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn same_message_types() {
+        use super::*;
+        let rust: &[(&str, u8)] = &[
+            ("T_HELLO", T_HELLO),
+            ("T_CONFIG", T_CONFIG),
+            ("T_VIDEO", T_VIDEO),
+            ("T_SETTINGS", T_SETTINGS),
+            ("T_AUTH", T_AUTH),
+            ("T_CHALLENGE", T_CHALLENGE),
+            ("T_AUTH_OK", T_AUTH_OK),
+            ("T_INPUT", T_INPUT),
+            ("T_PING", T_PING),
+            ("T_PONG", T_PONG),
+            ("T_AFMT", T_AFMT),
+            ("T_PCM", T_PCM),
+            ("T_CAM", T_CAM),
+            ("T_CAM_STATE", T_CAM_STATE),
+            ("T_CAM_DATA", T_CAM_DATA),
+            ("T_VOLUME_KEY", T_VOLUME_KEY),
+            ("T_VOLUME", T_VOLUME),
+            ("T_DECODER", T_DECODER),
+            ("T_KEY_REQUEST", T_KEY_REQUEST),
+            ("T_STILL", T_STILL),
+            ("VF_KEY", VF_KEY),
+            ("VF_CONFIG", VF_CONFIG),
+        ];
+        let kt = kotlin_consts(PROTO_KT);
+        for (name, v) in rust {
+            assert_eq!(kt.get(*name), Some(&u64::from(*v)), "{name} weicht in Proto.kt ab");
+        }
+        // keine Nachricht, die nur eine Seite kennt
+        let kt_types = kt.keys().filter(|k| k.starts_with("T_") || k.starts_with("VF_")).count();
+        assert_eq!(kt_types, rust.len(), "Proto.kt kennt Nachrichten, die proto.rs fehlen");
+        // Typen eindeutig
+        let mut seen: Vec<u8> = rust.iter().filter(|(n, _)| n.starts_with("T_")).map(|(_, v)| *v).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), rust.iter().filter(|(n, _)| n.starts_with("T_")).count());
+    }
+
+    #[test]
+    fn same_limits_and_ports() {
+        let kt = kotlin_consts(PROTO_KT);
+        assert_eq!(kt["MAX_FRAME"], super::MAX_FRAME as u64);
+        assert_eq!(kt["STILL_RGBA_ZLIB"], u64::from(crate::still::FORMAT_RGBA_ZLIB));
+        let cfg = crate::config::Config::default();
+        assert_eq!(kt["VIDEO_PORT"], u64::from(cfg.video_port));
+        assert_eq!(kt["AUDIO_PORT"], u64::from(cfg.audio_port));
+        // Anmeldung: dieselbe Höchstlänge vor der Anmeldung auf beiden Seiten
+        assert!(AUTH_KT.contains("Proto.readHeader(inp, 4096)"));
+    }
+}

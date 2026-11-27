@@ -201,11 +201,28 @@ mod tests {
 
     #[test]
     fn known_vector() {
-        // gleiche Werte prüft die Android-App (AuthTest in den Kommentaren von Auth.kt)
-        let t = pc_tag(&[1; 32], &[2; 32], &[3; 32]);
-        assert_eq!(t.len(), 32);
-        assert_ne!(t, app_tag(&[1; 32], &[2; 32], &[3; 32]));
-        println!("pc_tag={}", hex(&t));
+        // Dieselben Prüfwerte stehen in Auth.kt (dort mit der Kotlin-Implementierung errechnet):
+        // Rust und App müssen bei gleicher Eingabe dasselbe liefern.
+        let kt = crate::proto::kotlin_sync::AUTH_KT;
+        let expect = |label: &str| -> String {
+            let line = kt
+                .lines()
+                .find(|l| l.trim_start_matches([' ', '*']).starts_with(label))
+                .unwrap_or_else(|| panic!("Prüfwert „{label}“ fehlt in Auth.kt"));
+            line.rsplit(' ').next().unwrap().to_string()
+        };
+        let pc = pc_tag(&[1; 32], &[2; 32], &[3; 32]);
+        let app = app_tag(&[1; 32], &[2; 32], &[3; 32]);
+        assert_eq!(hex(&pc), expect("pc  ="));
+        assert_eq!(hex(&app), expect("app ="));
+        assert_ne!(pc, app);
+        // gleiche Kennungen auf beiden Seiten (sonst schlägt die Anmeldung fehl)
+        assert!(kt.contains(r#"mac(key, "USBCD1 pc", na, np)"#));
+        assert!(kt.contains(r#"mac(key, "USBCD1 app", na, np)"#));
+        // das Geheimnis kommt nur über den adb-Einstieg ".Connect" unter diesem Namen an
+        assert!(kt.contains(r#"EXTRA = "usbcd_token""#));
+        assert!(kt.contains(r#"ENTRY = ".Connect""#));
+        assert!(kt.contains("MessageDigest.isEqual"));
     }
 }
 

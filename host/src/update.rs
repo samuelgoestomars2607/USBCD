@@ -845,6 +845,56 @@ mod tests {
         assert!(parse_release("kein json").is_none());
     }
 
+    /// Weitere Fälle, die der Updater ablehnen muss.
+    #[test]
+    fn release_rejections() {
+        let ok = sample_json("v0.6.15", false, DOWNLOAD_PREFIX);
+        // Entwurf
+        assert!(parse_release(&ok.replace("\"draft\":false", "\"draft\":true")).is_none());
+        // unverschlüsselte Adresse
+        assert!(parse_release(&sample_json(
+            "v0.6.15",
+            false,
+            "http://github.com/samuelgoestomars2607/USBCD/releases/download/"
+        ))
+        .is_none());
+        // Tag mit Pfadanteilen oder ohne „v“
+        assert!(parse_release(&sample_json("v0.6.15/../x", false, DOWNLOAD_PREFIX)).is_none());
+        assert!(parse_release(&sample_json("0.6.15", false, DOWNLOAD_PREFIX)).is_none());
+        // Signatur fehlt
+        let no_sig = ok.replace("USBCD-Setup-0.6.15.exe.sig\"", "andere.sig\"");
+        assert!(parse_release(&no_sig).is_none());
+        // fremde Release-Seite wird durch die eigene ersetzt
+        let page = parse_release(&ok.replace(
+            "https://github.com/samuelgoestomars2607/USBCD/releases/tag/v0.6.15",
+            "https://example.com/x",
+        ))
+        .unwrap()
+        .page;
+        assert!(page.starts_with(PAGE_PREFIX));
+    }
+
+    /// Signaturdatei: genau fünf Zeilen, nichts davor, dazwischen oder danach.
+    #[test]
+    fn signature_file_rejections() {
+        let sha = "ab".repeat(32);
+        let sig = "cd".repeat(64);
+        let text = format!(
+            "usbcd-update 1\nversion 0.6.15\nfile USBCD-Setup-0.6.15.exe\nsha256 {sha}\nsignature {sig}\n"
+        );
+        assert!(parse_signed(&format!("{text}extra 1\n")).is_none());
+        assert!(parse_signed(&text.replace(&format!("sha256 {sha}\n"), "")).is_none());
+        assert!(parse_signed(&text.replace("version 0.6.15", "version 0.6.15-beta")).is_none());
+        assert!(parse_signed(&text.replace("file USBCD-Setup-0.6.15.exe", "file ..\\x.exe")).is_none());
+        assert!(parse_signed(&text.replace("signature ", "signature  ")).is_none());
+    }
+
+    /// Der eingebaute öffentliche Schlüssel ist gültig – sonst gäbe es gar keine Updates.
+    #[test]
+    fn public_key_present() {
+        assert!(public_key().is_some());
+    }
+
     #[test]
     fn signature_file() {
         let sha = "ab".repeat(32);

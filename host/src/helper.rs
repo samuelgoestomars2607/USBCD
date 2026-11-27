@@ -690,4 +690,37 @@ mod tests {
         assert!(parse("speaker-prepare 2 x").is_err());
         assert!(parse(&"x".repeat(600)).is_err());
     }
+
+    /// Randfälle: nur genau die erlaubten Formen gehen durch.
+    #[test]
+    fn rejects_edge_cases() {
+        // Groß-/Kleinschreibung, Leerzeichen, Steuerzeichen
+        assert!(parse("PING").is_err());
+        assert_eq!(parse("ping "), Ok(Cmd::Ping)); // leerer Rest, harmlos
+        assert!(parse(" ping").is_err());
+        assert!(parse("ping\0").is_err());
+        // Zahlen: keine Vorzeichen, keine Leerstellen, höchstens 5 Stellen
+        assert!(parse("vdd-on +2000 1200 60").is_err());
+        assert!(parse("vdd-on 2000  1200 60").is_err());
+        assert!(parse("vdd-on 2000 1200 060").is_ok());
+        assert!(parse("vdd-on 2000 1200 000060").is_err());
+        assert!(parse("vdd-on 0x7d0 1200 60").is_err());
+        // Namen: höchstens 40 Zeichen, nicht mit Leerzeichen beginnend, keine Steuerzeichen
+        assert!(parse(&format!("speaker-prepare 1 {}", "a".repeat(40))).is_ok());
+        assert!(parse(&format!("speaker-prepare 1 {}", "a".repeat(41))).is_err());
+        assert!(parse("speaker-prepare 1  Name").is_err());
+        assert!(parse("speaker-prepare 1 a\nb").is_err());
+        assert!(parse("speaker-prepare 1 a\tb").is_err());
+        assert!(parse("speaker-prepare 1 Lautsprecher (Tablet)").is_ok());
+        assert!(parse("speaker-prepare 1 a;b").is_err());
+        assert!(parse("speaker-prepare 1 a|b").is_err());
+    }
+
+    /// Rechte der Leitung: Netzwerkzugriff verboten, SYSTEM/Admins voll, angemeldete Nutzer
+    /// nur Lesen/Schreiben. Eine Änderung hier muss bewusst passieren.
+    #[test]
+    fn pipe_rights_unchanged() {
+        assert_eq!(PIPE_SDDL, "D:P(D;;GA;;;NU)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
+        assert_eq!(MAX_LINE, 512);
+    }
 }

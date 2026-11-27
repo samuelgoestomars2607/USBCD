@@ -341,4 +341,44 @@ mod tests {
         assert!(!super::valid_package("de..x"));
         assert!(!super::valid_package("de.1x"));
     }
+
+    /// Die Datei bleibt beim Speichern und Laden gleich; Auswahlwerte stehen als Text darin.
+    #[test]
+    fn file_round_trip() {
+        let d = super::Config::default();
+        let s = toml::to_string_pretty(&d).unwrap();
+        let back: super::Config = toml::from_str(&s).unwrap();
+        assert_eq!(toml::to_string_pretty(&back).unwrap(), s);
+        for line in [
+            "encoder = \"auto\"",
+            "codec = \"auto\"",
+            "volume_mode = \"auto\"",
+            "pen_pressure = \"linear\"",
+            "pen_button = \"right_click\"",
+            "video_port = 27183",
+            "audio_port = 27184",
+            "android_package = \"de.samuel.usbcd\"",
+        ] {
+            assert!(s.lines().any(|l| l == line), "fehlt in usbcd.toml: {line}");
+        }
+        assert!(!s.contains("test_decoder_fail"));
+    }
+
+    /// Ältere oder von Hand bearbeitete Dateien: unbekannte Einträge stören nicht,
+    /// fehlende bekommen den Standardwert, gesetzte Werte bleiben erhalten.
+    #[test]
+    fn old_files_still_load() {
+        let old: super::Config = toml::from_str(
+            "encoder = \"nvenc\"\ncodec = \"avc\"\npen_pressure = \"soft\"\npen_button = \"eraser\"\n\
+             volume_mode = \"manual\"\nunbekannter_eintrag = 1\n\n[devices.R52N123]\nname = \"Tab\"\nuse = true\n",
+        )
+        .unwrap();
+        assert_eq!(old.encoder, "nvenc");
+        assert_eq!(old.codec, "avc");
+        assert_eq!(old.pen_pressure, "soft");
+        assert_eq!(old.pen_button, "eraser");
+        assert_eq!(old.volume_mode, "manual");
+        assert_eq!(old.video_port, 27183);
+        assert!(old.devices["R52N123"].use_as_display);
+    }
 }
